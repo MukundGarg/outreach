@@ -1,0 +1,32 @@
+import { createServerClient } from '@supabase/ssr';
+import { NextResponse, type NextRequest } from 'next/server';
+export async function proxy(request: NextRequest) {
+  let response = NextResponse.next({ request });
+  if (process.env.NEXT_PUBLIC_DEMO_MODE !== 'false') return response;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  if (!url || !key) return response;
+  const db = createServerClient(url, key, {
+    cookies: {
+      getAll: () => request.cookies.getAll(),
+      setAll(values) {
+        values.forEach(({ name, value }) => request.cookies.set(name, value));
+        response = NextResponse.next({ request });
+        values.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+      },
+    },
+  });
+  await db.auth.getUser();
+  return response;
+}
+export const config = {
+  matcher: [
+    '/dashboard/:path*',
+    '/profile/:path*',
+    '/preferences/:path*',
+    '/applications/:path*',
+    '/outreach/:path*',
+    '/settings/:path*',
+    '/api/:path*',
+  ],
+};
