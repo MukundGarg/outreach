@@ -39,6 +39,23 @@ When `NEXT_PUBLIC_DEMO_MODE=false`:
 - Transitioning to `submitted` or active pipeline stages requires explicit candidate approval in the application workspace before database records update.
 - Authenticated PDF resumes (max 10 MB) upload to the private `resumes` Supabase Storage bucket with metadata recorded in the `resumes` table. Secure authorized downloads use short-lived signed URLs.
 
+## Hybrid AI Engine (Google Gemini + Dify)
+
+ApplyPilot AI implements a dual-engine architecture:
+- **Google Gemini (`@google/genai`)**:
+  - Structured PDF resume extraction (`resume_extract`) parsed server-side via `pdf-parse`. Extracted details are previewed in an interactive modal for candidate review before updating the profile.
+  - Job description analysis (`job_analyze`) with match scoring, matched requirements, missing skills, and role level detection.
+  - Recruiter reply classification (`reply_classify`) distinguishing interview invitations, rejections, positive interest, and explicit opt-outs.
+  - Basic screening question drafting (`simple_answer`).
+- **Dify AI Applications**:
+  - **Agent 1 (Application Intelligence)**: Form field mappings, screening question analysis with supporting evidence citations, and unresolved questions list.
+  - **Agent 2 (Outreach Intelligence)**: Context-aware personalized recruiter emails, business-day follow-up intervals, and explicit `stop` recommendations on opt-out.
+- **AI Task Router (`src/services/ai-router.ts`)**:
+  - Strongly typed task router enforcing strict Zod validation.
+  - Execution metadata safely audited to `agent_runs` without logging raw resumes or confidential communications.
+  - Demo mode returns deterministic mock fixtures with zero API calls.
+  - Explicit user approval is enforced on all AI-generated drafts. No application or email is sent autonomously.
+
 ## Browser checks
 
 After building, run `npx playwright install chromium` once on a standard workstation, then `npm run test:e2e`. If Chromium or Google Chrome is already installed, select its executable:

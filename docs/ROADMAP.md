@@ -20,14 +20,20 @@
 - Explicit candidate review and approval requirement for application stage transitions to submitted or active pipeline.
 - 9 passing unit/domain tests, 5 passing Playwright smoke tests, and reproducible integration script for disposable Supabase projects.
 
+### Milestone 02: Hybrid Gemini + Dify AI Integration (Completed)
+- Integrated official `@google/genai` SDK for Google Gemini tasks: structured resume PDF parsing via `pdf-parse`, job description qualification analysis, candidate-job matching, and recruiter reply classification with opt-out detection.
+- Integrated Dify API for deep workflow intelligence: Agent 1 (Application Intelligence for form mapping & screening questions) and Agent 2 (Outreach Intelligence for personalized emails, follow-up delay calculation, and stop/suppression recommendations).
+- Implemented explicit TypeScript AI Task Router (`src/services/ai-router.ts`) dispatching tasks with safe execution logging in `agent_runs`.
+- Interactive UI controls: "Analyze Resume" with editable modal preview in `ProfileForm`, "Analyze Job" & "Prepare Application" in `Applications`, and "Generate Recruiter Email" & "Classify Message" in `Outreach`.
+- Complete demo mode preservation: Deterministic mock fixtures (`src/lib/ai-mocks.ts`) with zero network overhead in demo mode.
+- 17 unit tests passed (`npm test`), strict TypeScript and ESLint verified, and production build succeeded.
+
 ## Upcoming milestones
 
-1. **Task 02: Verified Lyzr Transport & Agent Integration.**
-   - Review official API contracts for candidate, outreach, and response agents.
-   - Implement typed server adapter schemas, run provenance, timeouts, and user-reviewed outputs. No assumed endpoints.
-2. **Task 03: Gmail OAuth & Manual Approved Sending.**
+1. **Task 03: Gmail OAuth & Manual Approved Sending.**
    - Secure encrypted token lifecycle, minimum scopes, disconnect/revocation.
    - Explicit preview/approval, atomic idempotency claim, and provider outcome reconciliation.
+   - Opt-out suppression enforcement during message generation and sending.
 3. **Task 04: Scheduling & Reply Monitoring.**
    - Persistent UTC/timezone-aware schedules, weekend rules, cancellation on reply.
    - Safe worker claims/retries, thread reconciliation, human-reviewed reply classification.

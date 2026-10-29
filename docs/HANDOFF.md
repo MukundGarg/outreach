@@ -1,43 +1,40 @@
-# ApplyPilot AI — implementation handoff (Milestone 01)
+# ApplyPilot AI — implementation handoff (Milestone 02)
 
 ## Exact status
 
-ApplyPilot AI is now a functional authenticated application with persistent Supabase data services and private resume uploads, while fully preserving its isolated client-side demonstration mode.
+ApplyPilot AI now features a production-ready Hybrid AI engine combining Google Gemini (`@google/genai`) for structured extraction and fast classification with Dify AI for deep application intelligence and recruiter outreach generation, while fully preserving its isolated client-side demonstration mode.
 
 ### Working now
 
-- **Production workspace & clean separation**:
-  - In demo mode (`NEXT_PUBLIC_DEMO_MODE=true` default), the app continues using local sessionStorage with fictional sample data.
-  - In authenticated mode (`NEXT_PUBLIC_DEMO_MODE=false`), real users authenticate through Supabase Auth (`/login` and `/signup`) and access the full workspace.
-  - Loading, empty, error, and retry states are built into the authenticated data provider (`AuthenticatedWorkspaceProvider`).
-  - No demo records are mixed with user records, and database failures never silently fall back to mock data.
-- **Database persistence (Ten-table schema)**:
-  - User-scoped persistence for candidate profiles (`profiles`), job preferences (`candidate_preferences`), job applications (`job_applications`), immutable trigger-managed application audit events (`application_events`), and recruiter contacts (`recruiter_contacts`).
-  - Explicit serializers/deserializers (`src/lib/mappers.ts`) mapping frontend domain models to database columns with full strict typing (`database.types.ts`).
-  - Server-side transition validation in `services/applications.ts` backed by PostgreSQL trigger enforcement in `202610290001_foundation.sql`.
-- **Secure resume upload & private retrieval**:
-  - PDF file buffer validation enforcing strict `%PDF-` magic byte inspection and 10 MB maximum limit (`src/lib/pdf-validator.ts`).
-  - Scoped storage paths `<user_id>/<uuid>.pdf` in the private `resumes` bucket.
-  - Metadata tracking in the `resumes` table.
-  - Short-lived signed URLs for authorized retrieval and secure replacement/deletion.
-  - Zero raw resume logging or public bucket exposure.
-- **Explicit approval foundation (Task E)**:
-  - Applications cannot transition to `submitted` or active pipeline stages without explicit user review and approval recorded with an authenticated server timestamp.
-  - No client-fabricated timestamps accepted. External submission is intentionally withheld until authorized.
-- **Testing & verification**:
-  - 9 automated unit/domain tests passed (`npm test`).
+- **Hybrid AI Engine (`@google/genai` & Dify APIs)**:
+  - **Gemini Service (`src/services/gemini.ts`)**:
+    - Resume structured information extraction (`resume_extract`) directly from private PDF storage via `pdf-parse` (`parsePdfBufferToText`).
+    - Job description analysis (`job_analyze`) with match scoring, matched/missing requirements, and role level detection.
+    - Screening question drafting (`simple_answer`) utilizing candidate profile evidence.
+    - Recruiter reply classification (`reply_classify`) distinguishing interview invitations, rejections, interest, and explicit opt-outs.
+  - **Dify Service (`src/services/dify.ts`)**:
+    - Dify Agent 1 (`complex_application`): Multi-step form field mapping, screening question analysis with evidence citations, and missing qualifications analysis.
+    - Dify Agent 2 (`outreach_plan`): Context-aware recruiter email generation, follow-up delay timing, and explicit `stop`/opt-out recommendations.
+- **AI Task Router (`src/services/ai-router.ts`)**:
+  - Deterministic routing to Gemini vs. Dify based on task complexity.
+  - User and application-scoped execution logging in `agent_runs` table with safe error codes.
+  - Support for explicit user-approved degraded fallback if Dify is temporarily unreachable or misconfigured.
+  - Full demo mode preservation returning deterministic simulated results without network calls or credit consumption.
+- **Interactive UI Integration**:
+  - `ProfileForm`: "Analyze Resume" button downloads private resume from Supabase, runs Gemini structured extraction, and shows an editable preview modal before populating the form.
+  - `Applications` (Detail): "Analyze Job (Gemini)" and "Prepare Application (Dify Agent 1)" with editable screening answers and required human approval confirmation.
+  - `Outreach`: "Generate Recruiter Email (Dify Agent 2)" with editable subject/body, follow-up recommendations, and a dedicated Gemini "Classify Message" panel with automatic opt-out suppression alerts.
+- **Testing & validation**:
+  - 17 automated tests passing (`npm test`).
   - Strict TypeScript check passed (`npm run typecheck`).
-  - ESLint passed without errors or warnings (`npm run lint`).
-  - Production Next.js build passed (`npm run build`).
-  - 5 Playwright end-to-end browser tests passed (`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="..." npm run test:e2e`).
-  - Disposable Supabase integration test script provided (`tests/integration-supabase.ts`).
+  - ESLint passed with 0 errors (`npm run lint`).
+  - Next.js production build succeeded (`npm run build`).
 
-### Intentionally incomplete (Deferred to Task 02+)
+### Intentionally incomplete (Deferred to Task 03+)
 
-- Live Lyzr agent execution (official API contracts required; mock mode preserved).
-- Gmail OAuth token encryption/vault lifecycle and approved email sending.
-- Background worker scheduling and automated reply classification.
-- External browser form automation / LinkedIn scraping (strictly disallowed).
+- Gmail OAuth authorization flow and direct SMTP/API email dispatch.
+- Background cron scheduler and automated polling workers.
+- Third-party browser form submission (Playwright browser automation for job portals).
 
 ## Commands
 
@@ -53,11 +50,10 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/Ma
 
 ## Validation results
 
-- `npm ci`: passed without errors.
-- `npm run typecheck`: passed (0 TypeScript errors).
-- `npm run lint`: passed (0 ESLint errors/warnings).
-- `npm test`: 9 tests executed, 9 passed, 0 failures.
-- `npm run build`: passed; optimized production build generated with all dynamic/static routes.
+- `npm run typecheck`: passed (0 errors).
+- `npm run lint`: passed (0 errors).
+- `npm test`: 17 tests passed, 0 failures.
+- `npm run build`: passed; all routes compiled and optimized.
 - `npm run test:e2e`: 5 tests executed, 5 passed.
 - `tests/integration-supabase.ts`: executable script created for disposable Supabase instances. When cloud credentials are not supplied, marked skipped as required.
 

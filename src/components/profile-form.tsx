@@ -2,8 +2,9 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Download, FileUp, Save, ShieldCheck, Trash2 } from 'lucide-react';
+import { Download, FileUp, Save, ShieldCheck, Sparkles, Trash2 } from 'lucide-react';
 import { profileSchema, type CandidateProfile } from '@/lib/domain';
+import type { ExtractedProfile } from '@/lib/ai-schemas';
 import { useWorkspace } from './use-workspace';
 
 export function ProfileForm() {
@@ -13,10 +14,15 @@ export function ProfileForm() {
   const [fileMessage, setFileMessage] = useState('');
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [analyzingResume, setAnalyzingResume] = useState(false);
+  const [resumeAnalysisError, setResumeAnalysisError] = useState('');
+  const [showExtractedModal, setShowExtractedModal] = useState(false);
+  const [extractedData, setExtractedData] = useState<ExtractedProfile | null>(null);
 
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors },
   } = useForm<CandidateProfile>({ resolver: zodResolver(profileSchema), values: data.profile });
 
@@ -143,6 +149,40 @@ export function ProfileForm() {
                 >
                   <Download size={13} /> View private PDF
                 </a>
+                <button
+                  type="button"
+                  className="button"
+                  style={{ fontSize: 11, color: '#27694e', borderColor: '#789966' }}
+                  disabled={analyzingResume}
+                  onClick={async () => {
+                    setAnalyzingResume(true);
+                    setResumeAnalysisError('');
+                    try {
+                      const res = await fetch('/api/ai', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          task: 'resume_extract',
+                          resumeId: currentResume.resume.id,
+                        }),
+                      });
+                      const payload = await res.json();
+                      if (!res.ok || !payload.ok) {
+                        throw new Error(payload.error || 'Failed to analyze resume.');
+                      }
+                      setExtractedData(payload.data);
+                      setShowExtractedModal(true);
+                    } catch (err: unknown) {
+                      setResumeAnalysisError(
+                        err instanceof Error ? err.message : 'Error extracting resume data.',
+                      );
+                    } finally {
+                      setAnalyzingResume(false);
+                    }
+                  }}
+                >
+                  <Sparkles size={13} /> {analyzingResume ? 'Analyzing PDF with Gemini…' : 'Analyze Resume'}
+                </button>
                 {deleteUserResume && (
                   <button
                     type="button"
@@ -164,7 +204,108 @@ export function ProfileForm() {
             </div>
           )}
 
-          <label className="field">
+          {isDemo && (
+            <div style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="button"
+                style={{ fontSize: 12 }}
+                disabled={analyzingResume}
+                onClick={async () => {
+                  setAnalyzingResume(true);
+                  setResumeAnalysisError('');
+                  try {
+                    const res = await fetch('/api/ai', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        task: 'resume_extract',
+                        resumeText: 'Sample demo resume text for Sarah Jenkins.',
+                      }),
+                    });
+                    const payload = await res.json();
+                    if (!res.ok || !payload.ok) {
+                      throw new Error(payload.error || 'Failed to analyze demo resume.');
+                    }
+                    setExtractedData(payload.data);
+                    setShowExtractedModal(true);
+                  } catch (err: unknown) {
+                    setResumeAnalysisError(
+                      err instanceof Error ? err.message : 'Error extracting resume data.',
+                    );
+                  } finally {
+                    setAnalyzingResume(false);
+                  }
+                }}
+              >
+                <Sparkles size={13} /> {analyzingResume ? 'Analyzing Demo Resume…' : 'Analyze Demo Resume (Simulated)'}
+              </button>
+            </div>
+          )}
+
+          {resumeAnalysisError && (
+            <p className="notice" role="alert" style={{ marginTop: 12, color: '#a85649' }}>
+              {resumeAnalysisError}
+            </p>
+          )}
+
+          {showExtractedModal && extractedData && (
+            <div
+              className="card stack"
+              style={{
+                marginTop: 18,
+                background: '#f4f7f0',
+                border: '1px solid #789966',
+                padding: '18px',
+              }}
+            >
+              <div className="between">
+                <div className="row" style={{ color: '#27694e' }}>
+                  <Sparkles size={18} />
+                  <strong>AI Extracted Resume Preview (Gemini)</strong>
+                </div>
+                <span className="badge">Review before applying</span>
+              </div>
+              <p style={{ fontSize: 12, margin: '4px 0 12px' }} className="muted">
+                Review the structured fields extracted from your resume. Click &ldquo;Apply to Profile&rdquo; to populate your editable profile form, then save when satisfied.
+              </p>
+              <div className="stack" style={{ fontSize: 13, gap: 8 }}>
+                <div><strong>Headline:</strong> {extractedData.headline || '—'}</div>
+                <div><strong>Location:</strong> {extractedData.location || '—'}</div>
+                <div><strong>Skills:</strong> {extractedData.skills || '—'}</div>
+                <div><strong>Education:</strong> {extractedData.education || '—'}</div>
+                <div><strong>Experience:</strong> {extractedData.experience || '—'}</div>
+                <div><strong>Projects:</strong> {extractedData.projects || '—'}</div>
+              </div>
+              <div className="row" style={{ marginTop: 12 }}>
+                <button
+                  type="button"
+                  className="button primary"
+                  onClick={() => {
+                    if (extractedData.headline) setValue('headline', extractedData.headline);
+                    if (extractedData.location) setValue('location', extractedData.location);
+                    if (extractedData.skills) setValue('skills', extractedData.skills);
+                    if (extractedData.education) setValue('education', extractedData.education);
+                    if (extractedData.experience) setValue('experience', extractedData.experience);
+                    if (extractedData.projects) setValue('projects', extractedData.projects);
+                    setShowExtractedModal(false);
+                    setStatusMessage('Extracted information loaded into form. Review and click Save Profile.');
+                  }}
+                >
+                  Apply to Profile Form
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => setShowExtractedModal(false)}
+                >
+                  Discard
+                </button>
+              </div>
+            </div>
+          )}
+
+          <label className="field" style={{ marginTop: 16 }}>
             {currentResume ? 'Replace PDF · maximum 10 MB' : 'Choose PDF · maximum 10 MB'}
             <input
               type="file"
