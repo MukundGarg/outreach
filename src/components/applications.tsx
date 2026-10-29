@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowUpRight, Plus, Search } from 'lucide-react';
+import { ArrowLeft, ArrowUpRight, Plus, Search, ShieldAlert } from 'lucide-react';
 import {
   applicationStatuses,
   applicationSchema,
@@ -10,19 +10,23 @@ import {
   label,
   type ApplicationStatus,
 } from '@/lib/domain';
-import { useDemo } from './demo-provider';
+import { useWorkspace } from './use-workspace';
+
 export function Applications({ initialAdd = false }: { initialAdd?: boolean }) {
-  const { data, addApplication } = useDemo();
+  const { isDemo, data, addApplication } = useWorkspace();
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('all');
   const [show, setShow] = useState(initialAdd);
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
   const router = useRouter();
+
   const filtered = data.applications.filter(
     (a) =>
       `${a.title} ${a.company} ${a.location}`.toLowerCase().includes(query.toLowerCase()) &&
       (status === 'all' || a.status === status),
   );
+
   return (
     <>
       <div className="page-head">
@@ -39,7 +43,7 @@ export function Applications({ initialAdd = false }: { initialAdd?: boolean }) {
         <form
           className="card stack"
           style={{ marginBottom: 22 }}
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
             const values = Object.fromEntries(new FormData(e.currentTarget));
             const result = applicationSchema.safeParse(values);
@@ -47,12 +51,22 @@ export function Applications({ initialAdd = false }: { initialAdd?: boolean }) {
               setError(result.error.issues[0].message);
               return;
             }
-            router.push(`/applications/${addApplication(result.data)}`);
+            setBusy(true);
+            setError('');
+            try {
+              const newId = await addApplication(result.data);
+              router.push(`/applications/${newId}`);
+            } catch (err: unknown) {
+              setError(err instanceof Error ? err.message : 'Failed to add application');
+              setBusy(false);
+            }
           }}
         >
-          <h2>Add a sample opportunity</h2>
+          <h2>{isDemo ? 'Add a sample opportunity' : 'Add an application'}</h2>
           <div className="notice">
-            This creates a local draft only. No job application is submitted.
+            {isDemo
+              ? 'This creates a local draft only. No job application is submitted.'
+              : 'This records a draft application in your database. No external submission is made.'}
           </div>
           <div className="form-grid">
             {[
@@ -72,10 +86,10 @@ export function Applications({ initialAdd = false }: { initialAdd?: boolean }) {
               </label>
             ))}
           </div>
-          {error && <p role="alert">{error}</p>}
+          {error && <p role="alert" className="notice" style={{ color: '#a85649' }}>{error}</p>}
           <div>
-            <button type="submit" className="button primary">
-              Create demo draft
+            <button type="submit" className="button primary" disabled={busy}>
+              {busy ? 'Creating…' : isDemo ? 'Create demo draft' : 'Create draft application'}
             </button>
           </div>
         </form>
@@ -142,25 +156,54 @@ export function Applications({ initialAdd = false }: { initialAdd?: boolean }) {
         </div>
         {!filtered.length && <p className="empty">No opportunities match your filters.</p>}
         <div className="muted" style={{ padding: 18, fontSize: 11 }}>
-          {filtered.length} sample opportunities · Demo changes are local
+          {filtered.length} {isDemo ? 'sample opportunities · Demo changes are local' : 'applications in your pipeline'}
         </div>
       </section>
     </>
   );
 }
+
 export function ApplicationDetail({ id }: { id: string }) {
-  const { data, transition } = useDemo();
+  const { isDemo, data, transition } = useWorkspace();
+  const [transitionError, setTransitionError] = useState('');
+  const [pendingTarget, setPendingTarget] = useState<ApplicationStatus | ''>('');
+  const [approvalConfirmed, setApprovalConfirmed] = useState(false);
+  const [transitioning, setTransitioning] = useState(false);
+
   const a = data.applications.find((v) => v.id === id);
+
   if (!a)
     return (
       <section className="card">
         <h1>Opportunity not found</h1>
-        <p>Local drafts are available only in the browser session that created them.</p>
+        <p>
+          {isDemo
+            ? 'Local drafts are available only in the browser session that created them.'
+            : 'The requested application could not be found in your database.'}
+        </p>
         <Link className="button" href="/applications">
           Back to applications
         </Link>
       </section>
     );
+
+  const requiresApproval = (status: ApplicationStatus) =>
+    ['submitted', 'awaiting_response', 'under_review', 'interview', 'offer'].includes(status);
+
+  const executeTransition = async (target: ApplicationStatus, approved = false) => {
+    setTransitioning(true);
+    setTransitionError('');
+    try {
+      await transition(a.id, target, { approved });
+      setPendingTarget('');
+      setApprovalConfirmed(false);
+    } catch (err: unknown) {
+      setTransitionError(err instanceof Error ? err.message : 'Transition failed');
+    } finally {
+      setTransitioning(false);
+    }
+  };
+
   return (
     <>
       <Link href="/applications" className="row muted" style={{ marginBottom: 25 }}>
@@ -185,14 +228,25 @@ export function ApplicationDetail({ id }: { id: string }) {
             </a>
           )}
           <div className="notice">
-            All status updates are simulated. Marking a sample as submitted does not submit a form
-            or contact an employer.
+            {isDemo
+              ? 'All status updates are simulated. Marking a sample as submitted does not submit a form or contact an employer.'
+              : 'Status transitions update your database and record an immutable audit event. Moving to submitted or active pipeline requires explicit user approval.'}
           </div>
+
           <label className="field">
-            Move sample to next stage
+            Move {isDemo ? 'sample' : 'application'} to next stage
             <select
-              value=""
-              onChange={(e) => transition(a.id, e.target.value as ApplicationStatus)}
+              value={pendingTarget || ''}
+              disabled={transitioning}
+              onChange={(e) => {
+                const target = e.target.value as ApplicationStatus;
+                if (!target) return;
+                if (!isDemo && requiresApproval(target)) {
+                  setPendingTarget(target);
+                } else {
+                  executeTransition(target);
+                }
+              }}
             >
               <option value="" disabled>
                 Select a valid next status
@@ -206,7 +260,66 @@ export function ApplicationDetail({ id }: { id: string }) {
                 ))}
             </select>
           </label>
-          {a.status === 'closed' && <p className="muted">This sample opportunity is closed.</p>}
+
+          {/* Explicit User Approval Confirmation for Task E */}
+          {!isDemo && pendingTarget && requiresApproval(pendingTarget) && (
+            <div
+              className="card stack"
+              style={{
+                border: '1px solid #789966',
+                background: '#f4f7f0',
+                padding: '16px',
+                marginTop: '12px',
+              }}
+            >
+              <div className="row" style={{ color: '#27694e' }}>
+                <ShieldAlert size={18} />
+                <strong>Explicit User Review & Approval Required</strong>
+              </div>
+              <p style={{ fontSize: 12, margin: '4px 0 8px' }}>
+                You are transitioning this application to <strong>{label(pendingTarget)}</strong>.
+                ApplyPilot requires explicit candidate confirmation before recording an approved submission status.
+              </p>
+              <label className="check" style={{ fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  checked={approvalConfirmed}
+                  onChange={(e) => setApprovalConfirmed(e.target.checked)}
+                />{' '}
+                I have reviewed and approve moving this application to {label(pendingTarget)}.
+              </label>
+              <div className="row" style={{ marginTop: 8 }}>
+                <button
+                  className="button primary"
+                  disabled={!approvalConfirmed || transitioning}
+                  onClick={() => executeTransition(pendingTarget, true)}
+                >
+                  {transitioning ? 'Saving approval…' : `Confirm transition to ${label(pendingTarget)}`}
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  disabled={transitioning}
+                  onClick={() => {
+                    setPendingTarget('');
+                    setApprovalConfirmed(false);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {transitionError && (
+            <p className="notice" role="alert" style={{ color: '#a85649' }}>
+              {transitionError}
+            </p>
+          )}
+
+          {a.status === 'closed' && (
+            <p className="muted">This {isDemo ? 'sample opportunity' : 'application'} is closed.</p>
+          )}
         </section>
         <section className="card">
           <h2>Activity history</h2>
@@ -225,3 +338,4 @@ export function ApplicationDetail({ id }: { id: string }) {
     </>
   );
 }
+

@@ -1,10 +1,11 @@
 'use client';
 import { useState } from 'react';
 import { preferencesSchema } from '@/lib/domain';
-import { useDemo } from './demo-provider';
+import { useWorkspace } from './use-workspace';
 export function PreferencesForm() {
-  const { data, setPreferences } = useDemo();
+  const { isDemo, data, setPreferences } = useWorkspace();
   const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
   return (
     <>
       <div className="page-head">
@@ -15,7 +16,7 @@ export function PreferencesForm() {
       </div>
       <form
         className="card stack"
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
           const f = new FormData(e.currentTarget);
           const parsed = preferencesSchema.safeParse({
@@ -35,8 +36,19 @@ export function PreferencesForm() {
             setMessage(parsed.error.issues[0].message);
             return;
           }
-          setPreferences(parsed.data);
-          setMessage('Demo preferences saved to this browser session.');
+          setBusy(true);
+          try {
+            await setPreferences(parsed.data);
+            setMessage(
+              isDemo
+                ? 'Demo preferences saved to this browser session.'
+                : 'Preferences successfully saved to your account.',
+            );
+          } catch (err: unknown) {
+            setMessage(err instanceof Error ? err.message : 'Failed to save preferences.');
+          } finally {
+            setBusy(false);
+          }
         }}
       >
         <h2>Your ideal opportunity</h2>
@@ -103,8 +115,8 @@ export function PreferencesForm() {
           Open to relocation
         </label>
         <div>
-          <button type="submit" className="button primary">
-            Save demo preferences
+          <button type="submit" className="button primary" disabled={busy}>
+            {busy ? 'Saving…' : isDemo ? 'Save demo preferences' : 'Save preferences'}
           </button>
         </div>
         {message && (

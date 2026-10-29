@@ -13,24 +13,7 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
       authenticated = !!user;
     } catch {}
     if (!authenticated) redirect('/login');
-    return (
-      <main className="auth">
-        <section className="card">
-          <h1>Account connected</h1>
-          <p>
-            The full interactive workspace currently uses isolated demonstration data. Production
-            profile and outreach screens will be connected in the next phase.
-          </p>
-          <p>
-            No sample records are shown as your real data. The authenticated application API is
-            available at /api/applications.
-          </p>
-          <form action="/auth/logout" method="post">
-            <button className="button">Sign out</button>
-          </form>
-        </section>
-      </main>
-    );
+    return <Shell isDemo={false}>{children}</Shell>;
   }
-  return <Shell>{children}</Shell>;
+  return <Shell isDemo={true}>{children}</Shell>;
 }

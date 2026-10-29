@@ -85,4 +85,7 @@ test('agent input validation and demo database boundary', async ({ request }) =>
   expect(valid.status()).toBe(200);
   expect((await valid.json()).data.mode).toBe('mock');
   expect((await request.post('/api/applications', { data: {} })).status()).toBe(409);
+  expect((await request.get('/api/profile')).status()).toBe(409);
+  expect((await request.get('/api/preferences')).status()).toBe(409);
+  expect((await request.get('/api/resumes')).status()).toBe(409);
 });

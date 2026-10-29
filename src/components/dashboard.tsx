@@ -14,10 +14,10 @@ import {
   Video,
 } from 'lucide-react';
 import { BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { useDemo } from './demo-provider';
+import { useWorkspace } from './use-workspace';
 import { label } from '@/lib/domain';
 export function Dashboard() {
-  const { data } = useDemo();
+  const { isDemo, data } = useWorkspace();
   const apps = data.applications;
   const submitted = apps.filter((a) =>
     ['submitted', 'awaiting_response', 'under_review', 'interview', 'offer', 'rejected'].includes(
@@ -27,8 +27,8 @@ export function Dashboard() {
   const stats = [
     ['Total applications', apps.length, BriefcaseBusiness],
     ['Submitted', submitted, Check],
-    ['Recruiter emails', 2, Mail],
-    ['Replies received', 1, MessageCircle],
+    ['Recruiter emails', isDemo ? 2 : data.contacts.length, Mail],
+    ['Replies received', isDemo ? 1 : 0, MessageCircle],
     ['Interviews', apps.filter((a) => a.status === 'interview').length, Video],
     ['Offers', apps.filter((a) => a.status === 'offer').length, Sparkles],
   ] as const;
@@ -42,16 +42,26 @@ export function Dashboard() {
     ['Offer', 'offer'],
   ].map(([name, status]) => ({ name, count: apps.filter((a) => a.status === status).length }));
   function exportData() {
-    const blob = new Blob([JSON.stringify({ sampleData: true, applications: apps }, null, 2)], {
-      type: 'application/json',
-    });
+    const blob = new Blob(
+      [
+        JSON.stringify(
+          isDemo ? { sampleData: true, applications: apps } : { applications: apps },
+          null,
+          2,
+        ),
+      ],
+      {
+        type: 'application/json',
+      },
+    );
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'applypilot-demo-applications.json';
+    a.download = isDemo ? 'applypilot-demo-applications.json' : 'applypilot-applications.json';
     a.click();
     URL.revokeObjectURL(url);
   }
+  const firstName = data.profile.name ? data.profile.name.split(' ')[0] : 'there';
   return (
     <>
       <div className="page-head">
@@ -61,7 +71,7 @@ export function Dashboard() {
             A little progress, every day<span style={{ color: '#6c8a58' }}>.</span>
           </h1>
           <p className="muted">
-            Welcome back, {data.profile.name.split(' ')[0]}. Let’s keep your momentum going.
+            Welcome back, {firstName}. Let’s keep your momentum going.
           </p>
         </div>
         <Link href="/applications?add=true" className="button primary">
@@ -108,7 +118,7 @@ export function Dashboard() {
                   Every opportunity, a step forward.
                 </p>
               </div>
-              <span className="badge">Sample snapshot</span>
+              <span className="badge">{isDemo ? 'Sample snapshot' : 'Live pipeline'}</span>
             </div>
             <div
               className="chart"

@@ -1,13 +1,21 @@
 'use client';
 import { useState } from 'react';
-import { Mail, ShieldCheck } from 'lucide-react';
-import { useDemo } from './demo-provider';
+import { Mail, LogOut, ShieldCheck } from 'lucide-react';
+import { useWorkspace } from './use-workspace';
 import { nextFollowup } from '@/lib/domain';
 export function Settings() {
-  const { data, reset } = useDemo();
+  const { isDemo, data, resetDemo } = useWorkspace();
   const [message, setMessage] = useState('');
   const [days, setDays] = useState(3);
   const [weekends, setWeekends] = useState(true);
+  const initials = data.profile.name
+    ? data.profile.name
+        .split(' ')
+        .map((n) => n[0])
+        .slice(0, 2)
+        .join('')
+        .toUpperCase()
+    : 'AP';
   return (
     <>
       <div className="page-head">
@@ -18,15 +26,24 @@ export function Settings() {
       </div>
       <div className="stack">
         <section className="card">
-          <h2>Account information</h2>
-          <div className="row">
-            <div className="avatar">AM</div>
-            <div>
-              <strong>{data.profile.name}</strong>
-              <p className="muted" style={{ margin: '5px 0' }}>
-                {data.profile.email} · Sample account
-              </p>
+          <div className="between">
+            <div className="row">
+              <div className="avatar">{initials}</div>
+              <div>
+                <strong>{data.profile.name || (isDemo ? 'Alex Morgan' : 'Your Account')}</strong>
+                <p className="muted" style={{ margin: '5px 0' }}>
+                  {data.profile.email || (isDemo ? 'alex.morgan@example.com' : 'Authenticated user')} ·{' '}
+                  {isDemo ? 'Sample account' : 'Supabase authenticated'}
+                </p>
+              </div>
             </div>
+            {!isDemo && (
+              <form action="/auth/logout" method="post">
+                <button type="submit" className="button" style={{ fontSize: 12 }}>
+                  <LogOut size={13} /> Sign out
+                </button>
+              </form>
+            )}
           </div>
         </section>
         <div className="grid2">
@@ -91,18 +108,21 @@ export function Settings() {
             <ShieldCheck size={19} /> Privacy & control
           </h2>
           <p className="muted">
-            Demo profile and application edits are stored in session storage in this browser. Resume
-            contents are never uploaded here. No Gmail tokens are stored.
+            {isDemo
+              ? 'Demo profile and application edits are stored in session storage in this browser. Resume contents are never uploaded here. No Gmail tokens are stored.'
+              : 'Your profile, job pipeline, and uploaded resumes are securely isolated with Supabase Row Level Security. Data is never shared across users.'}
           </p>
-          <button
-            className="button"
-            onClick={() => {
-              reset();
-              setMessage('Local demo data reset. No real account data was affected.');
-            }}
-          >
-            Reset local demo data
-          </button>
+          {isDemo && resetDemo && (
+            <button
+              className="button"
+              onClick={() => {
+                resetDemo();
+                setMessage('Local demo data reset. No real account data was affected.');
+              }}
+            >
+              Reset local demo data
+            </button>
+          )}
         </section>
         {message && (
           <p className="notice" role="status">

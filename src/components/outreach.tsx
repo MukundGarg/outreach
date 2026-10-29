@@ -2,13 +2,14 @@
 import { useState } from 'react';
 import { Mail, Sparkles } from 'lucide-react';
 import { label } from '@/lib/domain';
-import { useDemo } from './demo-provider';
+import { useWorkspace } from './use-workspace';
 export function Outreach() {
-  const { data } = useDemo();
-  const [selected, setSelected] = useState(data.contacts[0].id);
+  const { isDemo, data } = useWorkspace();
+  const contacts = data.contacts;
+  const [selected, setSelected] = useState(contacts[0]?.id || '');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const contact = data.contacts.find((c) => c.id === selected)!;
+  const contact = contacts.find((c) => c.id === selected) || contacts[0];
   async function preview() {
     setBusy(true);
     try {
@@ -78,19 +79,27 @@ export function Outreach() {
         <section className="card">
           <div className="between">
             <h2 style={{ margin: 0 }}>Draft preview</h2>
-            <span className="badge">Sample email</span>
+            <span className="badge">{isDemo ? 'Sample email' : 'Draft email'}</span>
           </div>
-          <p className="muted" style={{ marginTop: 22, fontSize: 12 }}>
-            To: {contact.email}
-            <br />
-            Subject: Exploring opportunities at {contact.company}
-          </p>
-          <div className="email-preview">{contact.draft}</div>
-          <div className="notice">
-            Planned sample follow-up: {contact.followup}
-            <br />
-            Reply classification: not enabled · human review required
-          </div>
+          {contact ? (
+            <>
+              <p className="muted" style={{ marginTop: 22, fontSize: 12 }}>
+                To: {contact.email}
+                <br />
+                Subject: Exploring opportunities at {contact.company}
+              </p>
+              <div className="email-preview">{contact.draft || 'Draft content will appear here.'}</div>
+              <div className="notice">
+                Planned sample follow-up: {contact.followup || 'Not scheduled'}
+                <br />
+                Reply classification: not enabled · human review required
+              </div>
+            </>
+          ) : (
+            <p className="muted" style={{ marginTop: 22 }}>
+              No recruiter contacts available. Add contacts to preview outreach drafts.
+            </p>
+          )}
           <div className="row" style={{ marginTop: 20, flexWrap: 'wrap' }}>
             <button className="button primary" disabled={busy} onClick={preview}>
               <Sparkles size={15} />

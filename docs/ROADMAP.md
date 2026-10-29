@@ -9,13 +9,31 @@
 - Ten-entity SQL migration, RLS, private resume bucket, audit triggers and unique operation keys.
 - Server-only integration interfaces and follow-up date utility.
 
-## Suggested next prompts
+## Completed milestones
 
-1. **Connect authenticated persistence.** Apply/verify migration in disposable Supabase, test two-user RLS, add generated DB types, connect profile/preferences/application UI, implement validated resume upload/private retrieval. Keep demo provider independent. Add explicit production approval record and status-change API with transactional audit tests.
-2. **Verified Lyzr transport.** Obtain actual official API contracts for three configured agents; implement server adapter/response schemas, run provenance, timeout/error handling and user-reviewed outputs. No assumed endpoints.
-3. **Gmail OAuth and manual approved sending.** Secure encrypted token lifecycle, minimum scopes, disconnect/revocation, explicit preview/approval, atomic idempotency claim and provider outcome reconciliation. Start with a single approved email, not automation.
-4. **Scheduling and reply monitoring.** Persistent UTC/timezone-aware schedules, weekend rules, cancellation on reply, safe worker claims/retries, thread reconciliation, human-reviewed reply classification.
-5. **Supported form assistance.** User-initiated preparation and explicit submission approvals on supported sites; stop at login/CAPTCHA/restrictions. Never add unauthorized LinkedIn automation.
+### Milestone 01: Authenticated Persistence & Private Resume Upload (Completed)
+- Clean provider separation: Isolated local demo (`sessionStorage`) and production Supabase-backed workspace.
+- Production workspace connecting all screens with loading, empty, error, and retry states.
+- Authenticated, user-scoped persistence for profile, preferences, job applications, transition history, and recruiter contacts.
+- Strict mapping between frontend domain schemas and PostgreSQL tables with explicit serializers/deserializers.
+- Secure private PDF resume upload (max 10 MB, `%PDF-` buffer validation, user-scoped storage path, signed short-lived download URLs, and safe replacement/deletion).
+- Explicit candidate review and approval requirement for application stage transitions to submitted or active pipeline.
+- 9 passing unit/domain tests, 5 passing Playwright smoke tests, and reproducible integration script for disposable Supabase projects.
+
+## Upcoming milestones
+
+1. **Task 02: Verified Lyzr Transport & Agent Integration.**
+   - Review official API contracts for candidate, outreach, and response agents.
+   - Implement typed server adapter schemas, run provenance, timeouts, and user-reviewed outputs. No assumed endpoints.
+2. **Task 03: Gmail OAuth & Manual Approved Sending.**
+   - Secure encrypted token lifecycle, minimum scopes, disconnect/revocation.
+   - Explicit preview/approval, atomic idempotency claim, and provider outcome reconciliation.
+3. **Task 04: Scheduling & Reply Monitoring.**
+   - Persistent UTC/timezone-aware schedules, weekend rules, cancellation on reply.
+   - Safe worker claims/retries, thread reconciliation, human-reviewed reply classification.
+4. **Task 05: Supported Form Assistance.**
+   - User-initiated preparation and explicit submission approvals on supported sites.
+   - Stop at login/CAPTCHA/restrictions; zero unauthorized scraping or automation.
 
 ## Before any public deployment
 

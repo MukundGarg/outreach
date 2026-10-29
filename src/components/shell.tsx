@@ -19,6 +19,9 @@ import {
   X,
 } from 'lucide-react';
 import { DemoProvider } from './demo-provider';
+import { AuthenticatedWorkspaceProvider } from './authenticated-provider';
+import { WorkspaceConfigProvider, useWorkspaceConfig } from './workspace-config';
+import { useWorkspace } from './use-workspace';
 const links = [
   ['/dashboard', 'Overview', LayoutDashboard],
   ['/profile', 'Candidate profile', UserRound],
@@ -40,11 +43,32 @@ export function Brand() {
     </Link>
   );
 }
-export function Shell({ children }: { children: React.ReactNode }) {
+
+function ShellInner({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
+  const { isDemo } = useWorkspaceConfig();
+  const { data, loading, error, refresh } = useWorkspace();
+
+  const userDisplayName = isDemo
+    ? 'Alex Morgan'
+    : (data.profile.name || 'Your Profile');
+  const userInitials = isDemo
+    ? 'AM'
+    : (data.profile.name
+        ? data.profile.name
+            .split(' ')
+            .map((s) => s[0])
+            .slice(0, 2)
+            .join('')
+            .toUpperCase()
+        : 'AP');
+  const userSubtext = isDemo
+    ? 'Sample candidate · Demo'
+    : (data.profile.headline || 'Authenticated workspace');
+
   return (
-    <DemoProvider>
+    <>
       <aside className={`sidebar ${open ? 'open' : ''}`}>
         <div className="between">
           <Brand />
@@ -58,7 +82,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </button>
           )}
         </div>
-        <div className="nav-label">YOUR WORKSPACE</div>
+        <div className="nav-label">{isDemo ? 'YOUR WORKSPACE' : 'PRODUCTION WORKSPACE'}</div>
         <nav>
           {links.map(([href, title, Icon]) => (
             <Link
@@ -83,11 +107,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </Link>
           </div>
           <div className="row" style={{ padding: '0 8px' }}>
-            <div className="avatar">AM</div>
+            <div className="avatar">{userInitials}</div>
             <div>
-              <strong style={{ fontSize: 12 }}>Alex Morgan</strong>
+              <strong style={{ fontSize: 12 }}>{userDisplayName}</strong>
               <div className="muted" style={{ fontSize: 10, marginTop: 4 }}>
-                Sample candidate · Demo
+                {userSubtext}
               </div>
             </div>
           </div>
@@ -109,22 +133,74 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </span>
           </div>
           <div className="row">
-            <span className="demo-bar">● DEMO WORKSPACE · SAMPLE DATA</span>
+            {isDemo ? (
+              <span className="demo-bar">● DEMO WORKSPACE · SAMPLE DATA</span>
+            ) : (
+              <span className="demo-bar" style={{ background: '#e0efe4', color: '#1f5f3e' }}>
+                ● AUTHENTICATED WORKSPACE · SUPABASE PERSISTED
+              </span>
+            )}
             <span className="search-hint">
               <Command size={14} /> Built for your next chapter
             </span>
           </div>
         </header>
         <main className="content">
-          {children}
+          {!isDemo && loading ? (
+            <section className="card">
+              <h2>Loading your workspace…</h2>
+              <p className="muted">Retrieving your saved profile, preferences and applications.</p>
+            </section>
+          ) : !isDemo && error ? (
+            <section className="card stack">
+              <h2>Workspace connection error</h2>
+              <p className="notice" role="alert">{error}</p>
+              <p className="muted">Please verify your Supabase database connection and table permissions.</p>
+              {refresh && (
+                <div>
+                  <button className="button primary" onClick={() => refresh()}>
+                    Retry connection
+                  </button>
+                </div>
+              )}
+            </section>
+          ) : (
+            children
+          )}
           <footer className="footer">
             <span>© 2026 ApplyPilot AI · Make your next move count.</span>
             <span className="row">
-              <ShieldCheck size={13} /> Demo changes stay in this browser session
+              <ShieldCheck size={13} />{' '}
+              {isDemo
+                ? 'Demo changes stay in this browser session'
+                : 'Authenticated data securely persisted in Supabase'}
             </span>
           </footer>
         </main>
       </div>
-    </DemoProvider>
+    </>
   );
 }
+
+export function Shell({
+  children,
+  isDemo = true,
+}: {
+  children: React.ReactNode;
+  isDemo?: boolean;
+}) {
+  return (
+    <WorkspaceConfigProvider isDemo={isDemo}>
+      {isDemo ? (
+        <DemoProvider>
+          <ShellInner>{children}</ShellInner>
+        </DemoProvider>
+      ) : (
+        <AuthenticatedWorkspaceProvider>
+          <ShellInner>{children}</ShellInner>
+        </AuthenticatedWorkspaceProvider>
+      )}
+    </WorkspaceConfigProvider>
+  );
+}
+
