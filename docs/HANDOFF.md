@@ -1,40 +1,65 @@
-# ApplyPilot AI — implementation handoff (Milestone 02)
+# ApplyPilot AI — implementation handoff (Milestone 03)
 
 ## Exact status
 
-ApplyPilot AI now features a production-ready Hybrid AI engine combining Google Gemini (`@google/genai`) for structured extraction and fast classification with Dify AI for deep application intelligence and recruiter outreach generation, while fully preserving its isolated client-side demonstration mode.
+ApplyPilot AI has completed **Milestone 03: Live Integration Testing + Secure Gmail OAuth 2.0 + User-Approved Sending**.
+All live tests (Gemini G1–G4 and Dify D1–D3) have been verified with live API credentials. A secure Gmail OAuth 2.0 connection workflow with AES-256-GCM token encryption at rest and an explicit, human-approved recruiter email sending pipeline via official Gmail API have been implemented and verified. Outdated Lyzr references have been fully removed.
 
 ### Working now
 
-- **Hybrid AI Engine (`@google/genai` & Dify APIs)**:
-  - **Gemini Service (`src/services/gemini.ts`)**:
-    - Resume structured information extraction (`resume_extract`) directly from private PDF storage via `pdf-parse` (`parsePdfBufferToText`).
-    - Job description analysis (`job_analyze`) with match scoring, matched/missing requirements, and role level detection.
-    - Screening question drafting (`simple_answer`) utilizing candidate profile evidence.
-    - Recruiter reply classification (`reply_classify`) distinguishing interview invitations, rejections, interest, and explicit opt-outs.
-  - **Dify Service (`src/services/dify.ts`)**:
-    - Dify Agent 1 (`complex_application`): Multi-step form field mapping, screening question analysis with evidence citations, and missing qualifications analysis.
-    - Dify Agent 2 (`outreach_plan`): Context-aware recruiter email generation, follow-up delay timing, and explicit `stop`/opt-out recommendations.
-- **AI Task Router (`src/services/ai-router.ts`)**:
-  - Deterministic routing to Gemini vs. Dify based on task complexity.
-  - User and application-scoped execution logging in `agent_runs` table with safe error codes.
-  - Support for explicit user-approved degraded fallback if Dify is temporarily unreachable or misconfigured.
-  - Full demo mode preservation returning deterministic simulated results without network calls or credit consumption.
-- **Interactive UI Integration**:
-  - `ProfileForm`: "Analyze Resume" button downloads private resume from Supabase, runs Gemini structured extraction, and shows an editable preview modal before populating the form.
-  - `Applications` (Detail): "Analyze Job (Gemini)" and "Prepare Application (Dify Agent 1)" with editable screening answers and required human approval confirmation.
-  - `Outreach`: "Generate Recruiter Email (Dify Agent 2)" with editable subject/body, follow-up recommendations, and a dedicated Gemini "Classify Message" panel with automatic opt-out suppression alerts.
-- **Testing & validation**:
-  - 17 automated tests passing (`npm test`).
-  - Strict TypeScript check passed (`npm run typecheck`).
-  - ESLint passed with 0 errors (`npm run lint`).
-  - Next.js production build succeeded (`npm run build`).
+- **Live AI Verification (Tested against configured APIs)**:
+  - **Google Gemini (`gemini-3.5-flash-lite`)**:
+    - `G1` (Resume Extraction): Extracted name, education, skills, and projects from PDF text without fabricating employment history. Validated against `extractedProfileSchema`.
+    - `G2` (Job Analysis): Accurately identified React as matched, flagged missing experience requirements, and returned match score within [0, 100].
+    - `G3` (Screening Answer): Formulated truthful answer based only on resume facts.
+    - `G4` (Reply Classification): Successfully classified "Thank you for your interest, but please do not contact us again" as `opt_out`.
+  - **Dify Agent Intelligence (Stream-parsed Agent App)**:
+    - Updated Dify client to stream parsing (`response_mode: 'streaming'`) as required by Dify Agent Apps.
+    - `D1` (Agent 1 Application Intelligence): Generated structured requirements analysis, matched/missing flags, and screening answer conforming to `difyApplicationIntelligenceSchema`.
+    - `D2` (Agent 2 Outreach Intelligence): Generated personalized subject, recruiter body, and follow-up strategy conforming to `difyOutreachIntelligenceSchema`.
+    - `D3` (Stop Condition): With explicit opt-out response, returned `recommended_action: 'stop'`, `email_body: null`, and `followup_eligible: false`.
+- **Backend Security Hardening**:
+  - `src/services/ai-router.ts` now loads authoritative candidate profiles directly from the authenticated user's database records (`getProfile()`) rather than trusting arbitrary client parameters.
+  - Recruiter contacts are loaded directly from database records enforcing user ownership.
+  - Removed misleading static fallback text; degraded fallback explicitly invokes genuine Gemini generation when requested.
+- **Gmail OAuth 2.0 Integration**:
+  - Authorization code flow (`/api/integrations/gmail/connect`, `callback`, `status`, `disconnect`).
+  - Scopes restricted to minimal necessary: `https://www.googleapis.com/auth/gmail.send` and `https://www.googleapis.com/auth/userinfo.email`.
+  - CSRF protection via user-bound, cryptographically signed HTTP-only state cookie.
+  - Server-side token exchange and identity verification via Google UserInfo API (`/userinfo/v2/me`).
+  - Disconnect endpoint revokes authorization with Google and removes stored credentials.
+- **Token Encryption at Rest**:
+  - AES-256-GCM authenticated encryption (`src/lib/encryption.ts`) using 32-byte secret derived from `GMAIL_TOKEN_ENCRYPTION_KEY`.
+  - Nonce/IV and authentication tag stored alongside ciphertext; tampering is detected and rejected.
+  - Tokens refreshed automatically when expired or within 2 minutes of expiration.
+- **User-Approved Gmail Sending Pipeline**:
+  - RFC 5322 MIME message formatting with UTF-8 base64 encoded subject line and base64url message payload for Google `users.messages.send` API.
+  - Mandatory approval modal requiring explicit human review of recipient, subject, and body before sending.
+  - SHA-256 content fingerprinting (`calculateContentHash`); editing draft after approval invalidates approval hash and prevents transmission.
+  - Recruiter contact opt-out suppression check (`is_suppressed`); sending to suppressed contacts is strictly blocked.
+  - Idempotency key protection on `email_messages` table prevents duplicate transmissions on retry or double-click.
+  - Persists Gmail message ID, thread ID, and send timestamps in Supabase.
+- **Outreach UI (`src/components/outreach.tsx`)**:
+  - Gmail Connect/Disconnect button with live connection status badge and connected email address.
+  - Save Draft button persisting to Supabase (`/api/outreach/drafts`).
+  - Dify Agent 2 draft generation with true provider badge (`Dify Agent 2 Draft` vs `Gemini Fallback Draft`).
+  - Final Send Confirmation dialog displaying exact sender, recipient, subject, and body.
+  - Preserved Gemini reply classification and opt-out alert banner.
+  - Demo mode completely isolated from external Gmail sending.
 
-### Intentionally incomplete (Deferred to Task 03+)
+### Automated Test Suite
 
-- Gmail OAuth authorization flow and direct SMTP/API email dispatch.
-- Background cron scheduler and automated polling workers.
-- Third-party browser form submission (Playwright browser automation for job portals).
+- `npm test`: 25 passing tests (0 failures).
+  - 8 AI schema and parser validation tests.
+  - 5 domain transition and constraint tests.
+  - 8 Gmail OAuth encryption, RFC 5322 MIME, approval fingerprint, and sending safety tests.
+  - 4 persistence and PDF validation tests.
+
+### Intentionally incomplete (Deferred to Task 04/05)
+
+- Scheduled follow-up email cron automation (Task 04).
+- Automatic inbox polling and thread monitoring (Task 04).
+- Automated browser job application submission via Playwright (Task 05).
 
 ## Commands
 
@@ -45,21 +70,18 @@ npm run typecheck
 npm run lint
 npm test
 npm run build
-PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" npm run test:e2e
 ```
 
 ## Validation results
 
 - `npm run typecheck`: passed (0 errors).
 - `npm run lint`: passed (0 errors).
-- `npm test`: 17 tests passed, 0 failures.
-- `npm run build`: passed; all routes compiled and optimized.
-- `npm run test:e2e`: 5 tests executed, 5 passed.
-- `tests/integration-supabase.ts`: executable script created for disposable Supabase instances. When cloud credentials are not supplied, marked skipped as required.
+- `npm test`: 25 tests passed, 0 failures.
+- `npm run build`: passed; all 26 routes compiled and optimized.
 
-## Next milestone (Antigravity Task 02/05)
+## Next milestone (Antigravity Task 04/05)
 
-Proceed to verified Lyzr transport and agent integration:
-- Review official API contracts for the three Lyzr agents.
-- Implement server-side agent adapters with input validation, timeout handling, and provenance tracking.
-- Connect candidate intelligence and outreach drafting workflows to real agent outputs with mandatory human review.
+Proceed to scheduled follow-up automation and inbox monitoring:
+- Background worker for follow-up schedule execution.
+- Gmail inbox monitoring for recruiter replies using incremental OAuth consent (`gmail.readonly`).
+- Automatic reply categorization and suppression trigger.

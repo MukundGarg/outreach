@@ -263,6 +263,9 @@ export interface Database {
           email: string;
           company: string | null;
           role: string | null;
+          is_suppressed?: boolean;
+          suppression_reason?: string | null;
+          suppressed_at?: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -273,6 +276,9 @@ export interface Database {
           email: string;
           company?: string | null;
           role?: string | null;
+          is_suppressed?: boolean;
+          suppression_reason?: string | null;
+          suppressed_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -283,6 +289,9 @@ export interface Database {
           email?: string;
           company?: string | null;
           role?: string | null;
+          is_suppressed?: boolean;
+          suppression_reason?: string | null;
+          suppressed_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -328,6 +337,10 @@ export interface Database {
           campaign_id: string;
           gmail_message_id: string | null;
           gmail_thread_id: string | null;
+          recipient_email?: string | null;
+          approved_content_hash?: string | null;
+          send_error_category?: string | null;
+          send_error_details?: string | null;
           direction: 'inbound' | 'outbound';
           subject: string;
           body: string;
@@ -351,6 +364,10 @@ export interface Database {
           campaign_id: string;
           gmail_message_id?: string | null;
           gmail_thread_id?: string | null;
+          recipient_email?: string | null;
+          approved_content_hash?: string | null;
+          send_error_category?: string | null;
+          send_error_details?: string | null;
           direction?: 'inbound' | 'outbound';
           subject: string;
           body: string;
@@ -374,6 +391,10 @@ export interface Database {
           campaign_id?: string;
           gmail_message_id?: string | null;
           gmail_thread_id?: string | null;
+          recipient_email?: string | null;
+          approved_content_hash?: string | null;
+          send_error_category?: string | null;
+          send_error_details?: string | null;
           direction?: 'inbound' | 'outbound';
           subject?: string;
           body?: string;
@@ -388,6 +409,42 @@ export interface Database {
             | 'other'
             | 'needs_review'
             | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      gmail_oauth_connections: {
+        Row: {
+          id: string;
+          user_id: string;
+          email: string;
+          encrypted_access_token: string;
+          encrypted_refresh_token: string | null;
+          token_expires_at: string;
+          scopes: string[];
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          email: string;
+          encrypted_access_token: string;
+          encrypted_refresh_token?: string | null;
+          token_expires_at: string;
+          scopes?: string[];
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          email?: string;
+          encrypted_access_token?: string;
+          encrypted_refresh_token?: string | null;
+          token_expires_at?: string;
+          scopes?: string[];
           created_at?: string;
           updated_at?: string;
         };

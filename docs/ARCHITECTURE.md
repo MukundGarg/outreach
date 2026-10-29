@@ -29,13 +29,39 @@ The AI architecture adopts a clear division of responsibilities:
 
 ### AI Task Router (`src/services/ai-router.ts`)
 - Explicit TypeScript router (`routeAITask`) dispatches tasks to Gemini or Dify.
+- Authoritative candidate profile is loaded from the authenticated user's database records (`getProfile()`) rather than trusting arbitrary client parameters.
+- Recruiter contacts are loaded directly from database records enforcing user ownership.
 - Enforces strict input validation using `aiTaskRequestSchema`.
 - Logs execution provenance (model/agent ID, duration, status, safe error code) in the immutable `agent_runs` table without storing raw resumes or private correspondence.
 - In Demo Mode (`NEXT_PUBLIC_DEMO_MODE=true`), all tasks return deterministic, visibly labeled mock fixtures from `src/lib/ai-mocks.ts` with zero external network or paid API usage.
 - All AI suggestions require explicit human review and approval before database persistence. No external email or job application submission occurs automatically.
+
+## Gmail OAuth 2.0 & Sending Pipeline
+
+### Secure OAuth Flow
+- Official Google OAuth 2.0 authorization code flow via Next.js App Router (`/api/integrations/gmail/*`).
+- CSRF protection via user-bound, cryptographically signed state cookies (`<userId>:<nonce>`).
+- Minimal necessary scopes: `https://www.googleapis.com/auth/gmail.send` and `https://www.googleapis.com/auth/userinfo.email`. Mailbox reading is intentionally excluded until Task 04.
+- Identity verification via Google UserInfo API (`/userinfo/v2/me`) to bind connected email addresses to user accounts.
+
+### Token Encryption at Rest
+- Access and refresh tokens are encrypted before storage in `gmail_oauth_connections` table using authenticated AES-256-GCM.
+- Encryption key derived from server-only `GMAIL_TOKEN_ENCRYPTION_KEY` (32 bytes).
+- Nonce/IV (96-bit) and authentication tag (128-bit) are stored with ciphertext to guarantee data authenticity and confidentiality.
+- Tokens are automatically refreshed on the server when expired or within 2 minutes of expiration.
+- Disconnecting an account revokes access with Google and removes stored tokens.
+
+### User-Approved Sending & Safety Invariants
+- **Strict Human Approval**: Every email requires explicit user approval confirmation in the application modal showing recipient, subject, and exact body.
+- **Content Fingerprinting**: Computes a SHA-256 hash (`approvedContentHash`) across `recipient | subject | body`. Modifying draft content invalidates approval and prevents sending.
+- **Opt-Out & Suppression Invariant**: Contacts flagged with `is_suppressed = true` (via Gemini reply classification or explicit opt-out) unconditionally block all outbound sending.
+- **Idempotency**: Atomic operation keys prevent duplicate transmissions on network retry or double-click.
+- **RFC 5322 MIME & Base64URL**: Fully compliant email generation with UTF-8 encoded subject headers transmitted through Google's `users.messages.send` REST endpoint. Returned Gmail message IDs and thread IDs are persisted in `email_messages`.
+- **Demo Mode Isolation**: Outbound sending is completely prohibited in demo mode.
 
 ## Security and deployment
 
 No external credentials are bundled in UI. Only Supabase public configuration and demo flag are public. Route handlers return safe error messages; raw provider content is not logged. Production mode does not show fixtures as real data. Public demo endpoints perform only bounded deterministic work, not paid external calls. For a public launch add platform rate limiting and CSP, verify Supabase Auth redirect policies and exercise two-user isolation.
 
 No services are required for local demo. Supabase is required for real authentication/database mode. Live processes must restart after environment restoration; run the documented npm dev/start command rather than assuming a prior server survived.
+

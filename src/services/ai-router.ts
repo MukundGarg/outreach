@@ -12,7 +12,7 @@ import {
   runDifyApplicationIntelligence,
   runDifyOutreachIntelligence,
 } from './dify';
-import { authenticatedDatabase } from './applications';
+import { authenticatedDatabase, getProfile } from './applications';
 import type { CandidateProfile, RecruiterContact } from '@/lib/domain';
 
 import { mockAIResults } from '@/lib/ai-mocks';
@@ -51,6 +51,22 @@ export async function routeAITask<T>(
   const { db, user } = await authenticatedDatabase();
   const userId = options?.userId || user.id;
 
+  // Retrieve authoritative candidate profile from Supabase
+  const dbProfile = await getProfile();
+  const authoritativeProfile: CandidateProfile = dbProfile || {
+    name: user.email?.split('@')[0] || 'Candidate',
+    email: user.email || '',
+    headline: '',
+    location: '',
+    skills: '',
+    education: '',
+    experience: '',
+    projects: '',
+    portfolio: '',
+    github: '',
+    linkedin: '',
+  };
+
   let resultData: unknown;
   let provider: 'gemini' | 'dify';
   let modelOrAgent: string;
@@ -67,15 +83,14 @@ export async function routeAITask<T>(
 
       case 'job_analyze': {
         const jd = String(payload.jobDescription || '');
-        const profile = payload.candidateProfile as CandidateProfile;
-        resultData = await analyzeJobDescription(jd, profile);
+        resultData = await analyzeJobDescription(jd, authoritativeProfile);
         provider = 'gemini';
         modelOrAgent = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
         break;
       }
 
       case 'reply_classify': {
-        const msg = String(payload.messageText || '');
+        const msg = String(payload.messageText || payload.replyText || '');
         resultData = await classifyRecruiterReply(msg);
         provider = 'gemini';
         modelOrAgent = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
@@ -84,9 +99,8 @@ export async function routeAITask<T>(
 
       case 'simple_answer': {
         const q = String(payload.question || '');
-        const profile = payload.candidateProfile as CandidateProfile;
         const jobContext = payload.jobContext as string | undefined;
-        resultData = await draftBasicAnswer(q, profile, jobContext);
+        resultData = await draftBasicAnswer(q, authoritativeProfile, jobContext);
         provider = 'gemini';
         modelOrAgent = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
         break;
@@ -94,8 +108,7 @@ export async function routeAITask<T>(
 
       case 'candidate_match': {
         const jd = String(payload.jobDescription || '');
-        const profile = payload.candidateProfile as CandidateProfile;
-        resultData = await analyzeJobDescription(jd, profile);
+        resultData = await analyzeJobDescription(jd, authoritativeProfile);
         provider = 'gemini';
         modelOrAgent = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
         break;
@@ -109,7 +122,7 @@ export async function routeAITask<T>(
             jobTitle: String(payload.jobTitle || 'Role'),
             company: String(payload.company || 'Company'),
             jobDescription: String(payload.jobDescription || ''),
-            candidateProfile: payload.candidateProfile as CandidateProfile,
+            candidateProfile: authoritativeProfile,
             screeningQuestions: (payload.screeningQuestions as string[]) || [],
             userId,
           });
@@ -119,8 +132,7 @@ export async function routeAITask<T>(
           if (payload.allowDegradedFallback && process.env.GEMINI_API_KEY) {
             // Degraded mode explicitly approved by client parameter
             const jd = String(payload.jobDescription || '');
-            const profile = payload.candidateProfile as CandidateProfile;
-            const analysis = await analyzeJobDescription(jd, profile);
+            const analysis = await analyzeJobDescription(jd, authoritativeProfile);
             resultData = {
               job_summary: analysis.job_summary,
               requirements: analysis.requirements,
@@ -129,13 +141,13 @@ export async function routeAITask<T>(
               field_mappings: [
                 {
                   field_name: 'Full Name',
-                  proposed_value: profile.name,
+                  proposed_value: authoritativeProfile.name,
                   evidence: 'Profile',
                   requires_review: false,
                 },
                 {
                   field_name: 'Email',
-                  proposed_value: profile.email,
+                  proposed_value: authoritativeProfile.email,
                   evidence: 'Profile',
                   requires_review: false,
                 },
@@ -143,7 +155,7 @@ export async function routeAITask<T>(
               screening_answers: [],
               unresolved_questions: [],
               ready_for_review: true,
-              recommended_next_action: 'Dify service unavailable; completed in degraded Gemini analysis mode.',
+              recommended_next_action: 'Completed via Gemini fallback due to Dify service unavailability.',
             };
             modelOrAgent = 'gemini-degraded-fallback';
             provider = 'gemini';
@@ -157,10 +169,43 @@ export async function routeAITask<T>(
       case 'outreach_plan': {
         provider = 'dify';
         modelOrAgent = 'ApplyPilot-Outreach-Intelligence';
+
+        // Retrieve recruiter contact from database if contactId provided
+        let recruiter = payload.recruiter as RecruiterContact | undefined;
+        if (payload.contactId) {
+          const { data: cRow } = await db
+            .from('recruiter_contacts')
+            .select('*')
+            .eq('id', String(payload.contactId))
+            .eq('user_id', user.id)
+            .single();
+
+          if (cRow) {
+            recruiter = {
+              id: cRow.id,
+              name: cRow.name,
+              email: cRow.email,
+              company: cRow.company || '',
+              role: cRow.role || '',
+              status: 'draft',
+              draft: '',
+              followup: '',
+            };
+          }
+        }
+
+        if (!recruiter) {
+          recruiter = payload.recruiterContact as RecruiterContact;
+        }
+
+        if (!recruiter) {
+          throw new Error('Recruiter contact information is required for outreach planning');
+        }
+
         try {
           resultData = await runDifyOutreachIntelligence({
-            recruiter: payload.recruiter as RecruiterContact,
-            candidateProfile: payload.candidateProfile as CandidateProfile,
+            recruiter,
+            candidateProfile: authoritativeProfile,
             jobContext: payload.jobContext as string | undefined,
             priorCorrespondence: payload.priorCorrespondence as string | undefined,
             userId,
@@ -168,19 +213,19 @@ export async function routeAITask<T>(
         } catch (difyErr: unknown) {
           const msg = difyErr instanceof Error ? difyErr.message : String(difyErr);
           if (payload.allowDegradedFallback && process.env.GEMINI_API_KEY) {
-            // Degraded mode explicitly approved
-            const recruiter = payload.recruiter as RecruiterContact;
-            const profile = payload.candidateProfile as CandidateProfile;
+            // Live Gemini fallback drafting real content instead of static template
+            const prompt = `Draft a personalized initial outreach email from candidate ${authoritativeProfile.name} (skills: ${authoritativeProfile.skills}) to recruiter ${recruiter.name} at ${recruiter.company}.`;
+            const geminiDraft = await draftBasicAnswer(prompt, authoritativeProfile);
             resultData = {
               recommended_action: 'draft_initial',
-              subject: `Exploring opportunities at ${recruiter.company || 'your team'}`,
-              email_body: `Hi ${recruiter.name},\n\nI’m a software engineer specializing in ${profile.skills.slice(0, 50)}. I’d love to connect to discuss opportunities at ${recruiter.company}.\n\nBest,\n${profile.name}`,
-              personalization_evidence: ['Matched skills from profile'],
-              reasoning_summary: 'Drafted via degraded Gemini fallback because Dify API was unreachable.',
+              subject: `Exploring opportunities at ${recruiter.company || 'your team'} · ${authoritativeProfile.name}`,
+              email_body: geminiDraft.answer,
+              personalization_evidence: geminiDraft.key_points_used,
+              reasoning_summary: 'Drafted via live Gemini fallback because Dify API was unreachable.',
               reply_interpretation: null,
               followup_eligible: true,
               suggested_delay_business_days: 3,
-              warnings: ['Generated in degraded mode'],
+              warnings: ['Generated via Gemini degraded fallback'],
               requires_user_approval: true,
             };
             modelOrAgent = 'gemini-degraded-fallback';

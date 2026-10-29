@@ -64,9 +64,22 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/Ma
 ```
 The suite starts a local production server and tests routes, local editing, mock boundaries, mobile navigation, and API boundary isolation.
 
+## Gmail OAuth 2.0 & User-Approved Sending
+
+ApplyPilot AI connects securely to Gmail via Google OAuth 2.0:
+- **Official Authorization Code Flow**: `/api/integrations/gmail/connect` initiates Google OAuth with CSRF state cookies and minimal necessary scopes (`gmail.send` + `userinfo.email`). Mailbox reading is intentionally excluded until Task 04.
+- **AES-256-GCM Token Encryption**: Tokens are encrypted at rest with random 96-bit IVs and 128-bit authentication tags using `GMAIL_TOKEN_ENCRYPTION_KEY`.
+- **Mandatory Human Approval**: Every email transmission requires explicit human confirmation via modal dialog showing sender, recipient, subject, and body.
+- **Content Fingerprinting**: SHA-256 fingerprinting prevents transmission if the draft content was modified after approval.
+- **Opt-Out Suppression**: Recruiter contacts flagged as `is_suppressed` unconditionally block outbound transmission.
+- **Official Gmail API**: Transmits RFC 5322 MIME messages via `users.messages.send` and records Gmail message IDs.
+- For complete Google Cloud Console setup instructions, see [docs/GMAIL_SETUP.md](docs/GMAIL_SETUP.md).
+
 ## Supabase setup & migrations
 
-1. Create a Supabase project. Apply `supabase/migrations/202610290001_foundation.sql` using the Supabase SQL editor or CLI migration tool.
+1. Create a Supabase project. Apply migrations in order:
+   - `supabase/migrations/202610290001_foundation.sql` (Initial tables, RLS, storage buckets)
+   - `supabase/migrations/202610300001_gmail_oauth_sending.sql` (Gmail OAuth connections, contact suppression, sending metadata)
 2. Enable email/password Auth. Configure your application URL and `/auth/callback` redirect URL in Supabase Auth settings.
 3. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` in `.env.local`. No service-role key is needed or accepted by this app.
 4. Set `NEXT_PUBLIC_DEMO_MODE=false`, build, and sign in.
@@ -79,17 +92,22 @@ npx tsx tests/integration-supabase.ts
 
 ## Environment
 
-| Variable                               | Purpose                                                |
-| -------------------------------------- | ------------------------------------------------------ |
-| `NEXT_PUBLIC_DEMO_MODE`                | `true` for sample workspace; `false` for Supabase mode |
-| `NEXT_PUBLIC_SUPABASE_URL`             | Public project URL, needed for Auth/database           |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Public project key, protected by RLS                   |
-| `LYZR_MODE`                            | Only `mock` supported                                  |
-| `LYZR_API_KEY`                         | Future server-only Lyzr credential                     |
-| `LYZR_CANDIDATE_AGENT_ID`              | Independent Candidate Intelligence agent               |
-| `LYZR_OUTREACH_AGENT_ID`               | Independent Application & Outreach agent               |
-| `LYZR_RESPONSE_AGENT_ID`               | Independent Recruiter Response agent                   |
+| Variable                               | Purpose                                                                 |
+| -------------------------------------- | ----------------------------------------------------------------------- |
+| `NEXT_PUBLIC_DEMO_MODE`                | `true` for sample workspace; `false` for Supabase mode                  |
+| `NEXT_PUBLIC_SUPABASE_URL`             | Public project URL, needed for Auth/database                            |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Public project key, protected by RLS                                    |
+| `GEMINI_API_KEY`                       | Google Gemini API key for structured extraction & reply classification  |
+| `GEMINI_MODEL`                         | Google Gemini model identifier (e.g. `gemini-3.5-flash-lite`)           |
+| `DIFY_API_BASE_URL`                    | Dify API base URL (e.g. `https://api.dify.ai/v1`)                       |
+| `DIFY_APPLICATION_API_KEY`             | Dify Application Intelligence Agent 1 API key                           |
+| `DIFY_OUTREACH_API_KEY`                | Dify Outreach Intelligence Agent 2 API key                              |
+| `GOOGLE_OAUTH_CLIENT_ID`               | Google Cloud OAuth 2.0 Web Application Client ID                        |
+| `GOOGLE_OAUTH_CLIENT_SECRET`           | Google Cloud OAuth 2.0 Web Application Client Secret                    |
+| `GOOGLE_OAUTH_REDIRECT_URI`           | Google OAuth redirect callback URL                                      |
+| `GMAIL_TOKEN_ENCRYPTION_KEY`           | 32-byte hex key for AES-256-GCM token encryption at rest                |
 
-## Limitations
+## Limitations & Scope
 
-This milestone focuses on authenticated data persistence and private file storage. Live external Lyzr execution, Gmail sending/OAuth token vaults, background follow-up dispatchers, and automated web form submissions remain deferred to future tasks. Application submission transitions require explicit manual user approval, ensuring no external side-effects happen autonomously.
+Milestone 03 delivers verified live AI generation, secure Gmail OAuth 2.0 connection, AES-256-GCM encrypted token storage, and user-approved email dispatch via Gmail API. Background cron follow-up scheduling, automated inbox monitoring (`gmail.readonly`), and browser form automation remain deferred to Tasks 04 and 05. All outbound emails require explicit human confirmation in the UI modal.
+

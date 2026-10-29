@@ -108,6 +108,9 @@ export interface RecruiterContact {
   status: OutreachStatus;
   draft: string;
   followup: string;
+  reply?: string;
+  isSuppressed?: boolean;
+  suppressionReason?: string;
 }
 export function nextFollowup(start: Date, days: number, skipWeekends = true): Date {
   if (!Number.isInteger(days) || days < 1 || days > 365)

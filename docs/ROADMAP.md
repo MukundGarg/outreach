@@ -28,16 +28,25 @@
 - Complete demo mode preservation: Deterministic mock fixtures (`src/lib/ai-mocks.ts`) with zero network overhead in demo mode.
 - 17 unit tests passed (`npm test`), strict TypeScript and ESLint verified, and production build succeeded.
 
+### Milestone 03: Live Integration Testing + Secure Gmail OAuth + User-Approved Sending (Completed)
+- Live verification of Google Gemini (`gemini-3.5-flash-lite`) across extraction, job analysis, screening answers, and opt-out reply classification.
+- Live verification of Dify Agent 1 and Agent 2 via streaming SSE parser, validating structured responses and stop/suppression conditions.
+- Secure Gmail OAuth 2.0 connection flow with minimal scopes (`gmail.send` + `userinfo.email`), CSRF state validation, and identity verification.
+- AES-256-GCM token encryption at rest with random IVs and integrity tags using `GMAIL_TOKEN_ENCRYPTION_KEY`.
+- Database migration `202610300001_gmail_oauth_sending.sql` for connections, suppression status, and email messages.
+- Authoritative backend candidate profile and recruiter contact retrieval in `ai-router.ts`.
+- RFC 5322 MIME message formatting with UTF-8 base64 subjects and base64url encoding.
+- User-approved sending pipeline with mandatory confirmation dialog, SHA-256 content fingerprinting, opt-out suppression blocking, and idempotency key protection.
+- Extended Outreach UI with Gmail connect/disconnect, draft saving to Supabase, Dify draft generation, and send confirmation dialog.
+- 25 automated unit/integration tests passed (`npm test`), strict TypeScript and ESLint verified, and production build succeeded.
+
 ## Upcoming milestones
 
-1. **Task 03: Gmail OAuth & Manual Approved Sending.**
-   - Secure encrypted token lifecycle, minimum scopes, disconnect/revocation.
-   - Explicit preview/approval, atomic idempotency claim, and provider outcome reconciliation.
-   - Opt-out suppression enforcement during message generation and sending.
-3. **Task 04: Scheduling & Reply Monitoring.**
-   - Persistent UTC/timezone-aware schedules, weekend rules, cancellation on reply.
-   - Safe worker claims/retries, thread reconciliation, human-reviewed reply classification.
-4. **Task 05: Supported Form Assistance.**
+1. **Task 04: Follow-up Scheduling & Inbox Reply Monitoring.**
+   - Persistent UTC/timezone-aware schedules, weekend rules, automatic cancellation on reply.
+   - Background worker claims/retries, thread reconciliation.
+   - Incremental OAuth consent for `gmail.readonly` and inbox monitoring for replies.
+2. **Task 05: Supported Form Assistance.**
    - User-initiated preparation and explicit submission approvals on supported sites.
    - Stop at login/CAPTCHA/restrictions; zero unauthorized scraping or automation.
 

@@ -43,7 +43,7 @@ async function callDifyAgent(params: {
       body: JSON.stringify({
         inputs,
         query,
-        response_mode: 'blocking',
+        response_mode: 'streaming',
         user,
         ...(conversationId ? { conversation_id: conversationId } : {}),
       }),
@@ -62,12 +62,49 @@ async function callDifyAgent(params: {
       throw new Error(`Dify API request failed with status ${res.status}: ${errBody}`);
     }
 
-    const data = await res.json();
-    if (!data || typeof data.answer !== 'string') {
-      throw new Error('Unexpected Dify response format: missing answer field');
+    if (!res.body) {
+      throw new Error('Unexpected Dify response: response body is null');
     }
 
-    return data.answer;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let finalAnswer = '';
+    let agentMessageConcat = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n');
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(trimmed.slice(6));
+            if (data.event === 'message' && typeof data.answer === 'string') {
+              finalAnswer = data.answer;
+            } else if (data.event === 'agent_message' && typeof data.answer === 'string') {
+              agentMessageConcat += data.answer;
+            } else if (data.event === 'error') {
+              throw new Error(`Dify stream error: ${data.message || 'Unknown error'}`);
+            }
+          } catch (err: unknown) {
+            if (err instanceof Error && err.message.startsWith('Dify stream error:')) {
+              throw err;
+            }
+            // Ignore non-json or heartbeat SSE lines
+          }
+        }
+      }
+    }
+
+    const answer = finalAnswer || agentMessageConcat;
+    if (!answer || typeof answer !== 'string') {
+      throw new Error('Unexpected Dify response format: missing answer in streaming response');
+    }
+
+    return answer;
   } catch (err: unknown) {
     if (err instanceof Error && err.name === 'AbortError') {
       throw new Error('Dify API request timed out after 45 seconds');
@@ -156,12 +193,18 @@ export async function runDifyOutreachIntelligence(params: {
     throw new Error('DIFY_OUTREACH_API_KEY is not configured');
   }
 
-  const { recruiter, candidateProfile, jobContext = '', priorCorrespondence = '', userId } = params;
+  const {
+    recruiter,
+    candidateProfile,
+    jobContext = '',
+    priorCorrespondence = recruiter.reply || '',
+    userId,
+  } = params;
 
   const query = `Generate an outreach plan and draft for recruiter:
 Recruiter: ${recruiter.name} (${recruiter.role || 'Recruiter'} at ${recruiter.company || 'Company'}), Email: ${recruiter.email}
 Target Role/Context: ${jobContext || recruiter.role || 'Opportunity'}
-Prior Correspondence: ${priorCorrespondence || 'None'}
+Prior Correspondence / Recruiter Feedback: ${priorCorrespondence || 'None'}
 
 Candidate Profile:
 ${JSON.stringify({
@@ -172,14 +215,18 @@ ${JSON.stringify({
   portfolio: candidateProfile.portfolio,
 })}
 
+RULES:
+- If prior correspondence or feedback indicates the recipient requested not to be contacted, to stop, or to be removed/unsubscribed: you MUST set "recommended_action": "stop", "email_body": null, and "followup_eligible": false.
+- Otherwise generate a thoughtful draft with "requires_user_approval": true.
+
 Respond with JSON strictly matching:
 {
-  "recommended_action": "draft_initial",
+  "recommended_action": "draft_initial | draft_followup | pause | stop | needs_review",
   "subject": "Exploring opportunities at ${recruiter.company || 'your team'}",
-  "email_body": "Personalized draft email text",
+  "email_body": "Personalized draft email text or null if stopped",
   "personalization_evidence": ["Reason 1", "Reason 2"],
   "reasoning_summary": "Why this outreach angle was chosen",
-  "reply_interpretation": null,
+  "reply_interpretation": "Interpretation of prior reply or null",
   "followup_eligible": true,
   "suggested_delay_business_days": 3,
   "warnings": [],
