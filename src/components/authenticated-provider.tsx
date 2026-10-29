@@ -65,6 +65,8 @@ interface AuthenticatedContextValue {
   transition: (id: string, status: ApplicationStatus, options?: { approved?: boolean }) => Promise<void>;
   uploadResumeFile: (file: File) => Promise<void>;
   deleteUserResume: (id: string) => Promise<void>;
+  addContact: (input: { name: string; email: string; company?: string; role?: string }) => Promise<RecruiterContact>;
+  deleteContact: (id: string) => Promise<void>;
 }
 
 const Context = createContext<AuthenticatedContextValue | null>(null);
@@ -76,11 +78,12 @@ export function AuthenticatedWorkspaceProvider({ children }: { children: React.R
 
   const loadData = useCallback(async () => {
     try {
-      const [profRes, prefRes, appsRes, resumeRes] = await Promise.all([
+      const [profRes, prefRes, appsRes, resumeRes, contactsRes] = await Promise.all([
         fetch('/api/profile'),
         fetch('/api/preferences'),
         fetch('/api/applications'),
         fetch('/api/resumes'),
+        fetch('/api/outreach/contacts'),
       ]);
 
       if (!profRes.ok || !prefRes.ok || !appsRes.ok) {
@@ -91,12 +94,13 @@ export function AuthenticatedWorkspaceProvider({ children }: { children: React.R
       const prefJson = await prefRes.json();
       const appsJson = await appsRes.json();
       const resumeJson = resumeRes.ok ? await resumeRes.json() : { data: null };
+      const contactsJson = contactsRes.ok ? await contactsRes.json() : { data: [] };
 
       setData({
         profile: profJson.data ?? emptyData.profile,
         preferences: prefJson.data ?? emptyData.preferences,
         applications: appsJson.data ?? [],
-        contacts: [],
+        contacts: contactsJson.data ?? [],
         resume: resumeJson.data ?? null,
       });
       setError(null);
@@ -111,11 +115,12 @@ export function AuthenticatedWorkspaceProvider({ children }: { children: React.R
     let active = true;
     void (async () => {
       try {
-        const [profRes, prefRes, appsRes, resumeRes] = await Promise.all([
+        const [profRes, prefRes, appsRes, resumeRes, contactsRes] = await Promise.all([
           fetch('/api/profile'),
           fetch('/api/preferences'),
           fetch('/api/applications'),
           fetch('/api/resumes'),
+          fetch('/api/outreach/contacts'),
         ]);
 
         if (!active) return;
@@ -127,13 +132,14 @@ export function AuthenticatedWorkspaceProvider({ children }: { children: React.R
         const prefJson = await prefRes.json();
         const appsJson = await appsRes.json();
         const resumeJson = resumeRes.ok ? await resumeRes.json() : { data: null };
+        const contactsJson = contactsRes.ok ? await contactsRes.json() : { data: [] };
 
         if (!active) return;
         setData({
           profile: profJson.data ?? emptyData.profile,
           preferences: prefJson.data ?? emptyData.preferences,
           applications: appsJson.data ?? [],
-          contacts: [],
+          contacts: contactsJson.data ?? [],
           resume: resumeJson.data ?? null,
         });
         setError(null);
@@ -241,6 +247,44 @@ export function AuthenticatedWorkspaceProvider({ children }: { children: React.R
     setData((d) => ({ ...d, resume: null }));
   };
 
+  const handleAddContact = async (input: {
+    name: string;
+    email: string;
+    company?: string;
+    role?: string;
+  }): Promise<RecruiterContact> => {
+    const res = await fetch('/api/outreach/contacts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to add contact');
+    }
+    const json = await res.json();
+    const newContact: RecruiterContact = json.data;
+    setData((d) => ({
+      ...d,
+      contacts: [newContact, ...d.contacts.filter((c) => c.id !== newContact.id)],
+    }));
+    return newContact;
+  };
+
+  const handleDeleteContact = async (id: string): Promise<void> => {
+    const res = await fetch(`/api/outreach/contacts?id=${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to delete contact');
+    }
+    setData((d) => ({
+      ...d,
+      contacts: d.contacts.filter((c) => c.id !== id),
+    }));
+  };
+
   return (
     <Context.Provider
       value={{
@@ -254,6 +298,8 @@ export function AuthenticatedWorkspaceProvider({ children }: { children: React.R
         transition: handleTransition,
         uploadResumeFile: handleUploadResume,
         deleteUserResume: handleDeleteResume,
+        addContact: handleAddContact,
+        deleteContact: handleDeleteContact,
       }}
     >
       {children}

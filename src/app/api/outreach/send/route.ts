@@ -11,6 +11,7 @@ const sendEmailRequestSchema = z.object({
   subject: z.string().min(1).max(300),
   body: z.string().min(1).max(20000),
   approvalConfirmed: z.literal(true), // Strictly requires true
+  expectedApprovedHash: z.string().optional(),
   operationKey: z.string().uuid().optional(),
 });
 
@@ -48,6 +49,7 @@ export async function POST(request: Request) {
       subject,
       body,
       approvalConfirmed,
+      expectedApprovedHash,
       operationKey,
     } = parsed.data;
 
@@ -89,6 +91,7 @@ export async function POST(request: Request) {
       subject,
       body,
       approvalConfirmed,
+      expectedApprovedHash,
       operationKey,
     });
 

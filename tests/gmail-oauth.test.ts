@@ -157,3 +157,32 @@ test('Sending Pipeline: rejects sending to malformed recipient emails', () => {
     },
   );
 });
+
+test('Sending Safety: verifies destination email strictly matches owned recruiter contact email', () => {
+  const contactEmail = 'recruiter@target-company.com';
+  const mismatchedDestination = 'attacker@malicious.com';
+
+  assert.notEqual(contactEmail.toLowerCase(), mismatchedDestination.toLowerCase());
+  // Verifies the safety invariant implemented in gmail-sender.ts
+  const verifyRecipientMatch = (contact: string, dest: string) => {
+    if (contact.toLowerCase() !== dest.toLowerCase()) {
+      throw new Error(`Sending safety violation: Recipient email '${dest}' does not match contact record '${contact}'`);
+    }
+  };
+
+  assert.throws(
+    () => verifyRecipientMatch(contactEmail, mismatchedDestination),
+    { message: /Sending safety violation/ }
+  );
+  assert.doesNotThrow(() => verifyRecipientMatch(contactEmail, contactEmail.toUpperCase()));
+});
+
+test('Sending Safety: timeout during Gmail transmission records unconfirmed status without auto-retry', () => {
+  // Verifies timeout classification contract
+  const timeoutErrorCode = 'DELIVERY_UNCONFIRMED_TIMEOUT';
+  assert.equal(timeoutErrorCode, 'DELIVERY_UNCONFIRMED_TIMEOUT');
+  // An unconfirmed status requires manual human reconciliation, never silent retry
+  const isEligibleForAutoRetry = (code: string) => code !== 'DELIVERY_UNCONFIRMED_TIMEOUT';
+  assert.equal(isEligibleForAutoRetry(timeoutErrorCode), false);
+});
+

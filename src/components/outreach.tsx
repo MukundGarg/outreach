@@ -5,22 +5,33 @@ import {
   ExternalLink,
   Mail,
   MessageSquare,
+  Plus,
   Send,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
   Trash2,
+  UserPlus,
 } from 'lucide-react';
-import { label } from '@/lib/domain';
+import { label, type RecruiterContact } from '@/lib/domain';
 import type { DifyOutreachIntelligence, ReplyClassification } from '@/lib/ai-schemas';
 import { useWorkspace } from './use-workspace';
 
 export function Outreach() {
-  const { isDemo, data } = useWorkspace();
+  const { isDemo, data, addContact, deleteContact } = useWorkspace();
   const contacts = data.contacts;
   const [selected, setSelected] = useState(contacts[0]?.id || '');
   const [message, setMessage] = useState('');
   const [generatingDraft, setGeneratingDraft] = useState(false);
+
+  // New Contact Modal State
+  const [showAddContactModal, setShowAddContactModal] = useState(false);
+  const [newContactName, setNewContactName] = useState('');
+  const [newContactEmail, setNewContactEmail] = useState('');
+  const [newContactCompany, setNewContactCompany] = useState('');
+  const [newContactRole, setNewContactRole] = useState('');
+  const [savingContact, setSavingContact] = useState(false);
+  const [contactError, setContactError] = useState('');
 
   // Gmail OAuth Connection state
   const [gmailConnected, setGmailConnected] = useState(false);
@@ -33,6 +44,7 @@ export function Outreach() {
   const [editedSubject, setEditedSubject] = useState('');
   const [editedBody, setEditedBody] = useState('');
   const [draftApproved, setDraftApproved] = useState(false);
+  const [approvedHash, setApprovedHash] = useState<string | null>(null);
   const [savingDraft, setSavingDraft] = useState(false);
 
   // Approved Sending State
@@ -47,6 +59,18 @@ export function Outreach() {
   const [replyError, setReplyError] = useState('');
 
   const contact = contacts.find((c) => c.id === selected) || contacts[0];
+
+  // Helper to switch contact and initialize draft editor
+  function handleSelectContact(newContact: RecruiterContact) {
+    setSelected(newContact.id);
+    setMessage('');
+    setOutreachResult(null);
+    setSentResult(null);
+    setEditedBody(newContact.draft || '');
+    setEditedSubject(`Exploring opportunities at ${newContact.company || 'your team'}`);
+    setDraftApproved(false);
+    setApprovedHash(null);
+  }
 
   // Fetch Gmail Connection Status on mount
   useEffect(() => {
@@ -68,6 +92,72 @@ export function Outreach() {
       cancelled = true;
     };
   }, [isDemo]);
+
+  async function handleCreateContact(e: React.FormEvent) {
+    e.preventDefault();
+    setContactError('');
+    if (!newContactName.trim() || !newContactEmail.trim()) {
+      setContactError('Name and valid email are required.');
+      return;
+    }
+
+    setSavingContact(true);
+    try {
+      if (isDemo) {
+        // In demo mode: create contact in local list
+        const demoNew: RecruiterContact = {
+          id: `rec-${Date.now()}`,
+          name: newContactName.trim(),
+          email: newContactEmail.trim(),
+          company: newContactCompany.trim() || 'Company',
+          role: newContactRole.trim() || 'Recruiter',
+          status: 'draft',
+          draft: '',
+          followup: '',
+        };
+        data.contacts.unshift(demoNew);
+        setSelected(demoNew.id);
+        setShowAddContactModal(false);
+        setMessage('Contact created in demo workspace.');
+      } else if (addContact) {
+        const created = await addContact({
+          name: newContactName,
+          email: newContactEmail,
+          company: newContactCompany,
+          role: newContactRole,
+        });
+        setSelected(created.id);
+        setShowAddContactModal(false);
+        setMessage('Recruiter contact created successfully in database.');
+      }
+      setNewContactName('');
+      setNewContactEmail('');
+      setNewContactCompany('');
+      setNewContactRole('');
+    } catch (err: unknown) {
+      setContactError(err instanceof Error ? err.message : 'Failed to create contact');
+    } finally {
+      setSavingContact(false);
+    }
+  }
+
+  async function handleDeleteSelectedContact() {
+    if (!contact) return;
+    if (isDemo) {
+      setMessage('Deleting contacts in demo mode is local-only.');
+      return;
+    }
+    if (confirm(`Are you sure you want to delete recruiter contact ${contact.name}?`)) {
+      try {
+        if (deleteContact) {
+          await deleteContact(contact.id);
+          setMessage(`Contact ${contact.name} deleted.`);
+        }
+      } catch (err: unknown) {
+        setMessage(err instanceof Error ? err.message : 'Failed to delete contact');
+      }
+    }
+  }
 
   async function handleConnectGmail() {
     try {
@@ -130,6 +220,7 @@ export function Outreach() {
       setEditedSubject(draftData.subject || `Exploring opportunities at ${contact.company}`);
       setEditedBody(draftData.email_body || contact.draft || '');
       setDraftApproved(false);
+      setApprovedHash(null);
       setMessage(`Draft generated via ${result.provider === 'gemini' ? 'Gemini Degraded Fallback' : result.provider === 'mock' ? 'Demo Mock' : 'Dify Agent 2'}. Review before approval.`);
     } catch (err: unknown) {
       setMessage(err instanceof Error ? err.message : 'Error generating outreach draft.');
@@ -156,6 +247,7 @@ export function Outreach() {
       if (!res.ok || !payload.ok) {
         throw new Error(payload.error || 'Failed to save draft to database.');
       }
+      contact.draft = editedBody;
       setMessage(isDemo ? 'Draft saved in demo mode.' : 'Email draft saved securely to database.');
     } catch (err: unknown) {
       setMessage(err instanceof Error ? err.message : 'Error saving draft.');
@@ -178,6 +270,7 @@ export function Outreach() {
           subject: editedSubject,
           body: editedBody,
           approvalConfirmed: true,
+          expectedApprovedHash: approvedHash || undefined,
         }),
       });
       const payload = await res.json();
@@ -186,7 +279,7 @@ export function Outreach() {
       }
       setSentResult(payload.data);
       setShowConfirmModal(false);
-      setMessage(`Email successfully delivered via Gmail API! Message ID: ${payload.data.gmailMessageId}`);
+      setMessage(`Email successfully accepted by Gmail API! (Gmail Message ID: ${payload.data.gmailMessageId})`);
     } catch (err: unknown) {
       setMessage(err instanceof Error ? err.message : 'Error sending email.');
     } finally {
@@ -286,37 +379,61 @@ export function Outreach() {
 
       <div className="grid2">
         <section className="stack" style={{ alignContent: 'start' }}>
-          <h2>Recruiter contacts</h2>
-          {data.contacts.map((c) => (
+          <div className="between">
+            <h2>Recruiter contacts</h2>
             <button
-              key={c.id}
-              className={`contact ${selected === c.id ? 'selected' : ''}`}
-              onClick={() => {
-                setSelected(c.id);
-                setMessage('');
-                setOutreachResult(null);
-                setSentResult(null);
-              }}
+              type="button"
+              className="button"
+              style={{ fontSize: 12 }}
+              onClick={() => setShowAddContactModal(true)}
             >
-              <div className="between">
-                <div className="row">
-                  <div className="avatar">
-                    {c.name
-                      .split(' ')
-                      .map((n) => n[0])
-                      .join('')}
-                  </div>
-                  <div>
-                    <strong>{c.name}</strong>
-                    <p className="muted" style={{ margin: '5px 0 0', fontSize: 12 }}>
-                      {c.role} · {c.company}
-                    </p>
-                  </div>
-                </div>
-                <span className={`badge ${c.status}`}>{label(c.status)}</span>
-              </div>
+              <Plus size={13} /> Add Contact
             </button>
-          ))}
+          </div>
+
+          {data.contacts.length === 0 ? (
+            <div className="card stack" style={{ padding: 16, textAlign: 'center' }}>
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                No recruiter contacts found. Add a contact to start drafting tailored outreach.
+              </p>
+              <div style={{ marginTop: 8 }}>
+                <button
+                  type="button"
+                  className="button primary"
+                  style={{ fontSize: 12 }}
+                  onClick={() => setShowAddContactModal(true)}
+                >
+                  <UserPlus size={13} /> Create First Contact
+                </button>
+              </div>
+            </div>
+          ) : (
+            data.contacts.map((c) => (
+              <button
+                key={c.id}
+                className={`contact ${selected === c.id ? 'selected' : ''}`}
+                onClick={() => handleSelectContact(c)}
+              >
+                <div className="between">
+                  <div className="row">
+                    <div className="avatar">
+                      {c.name
+                        .split(' ')
+                        .map((n) => n[0])
+                        .join('')}
+                    </div>
+                    <div>
+                      <strong>{c.name}</strong>
+                      <p className="muted" style={{ margin: '5px 0 0', fontSize: 12 }}>
+                        {c.role} · {c.company}
+                      </p>
+                    </div>
+                  </div>
+                  <span className={`badge ${c.status}`}>{label(c.status)}</span>
+                </div>
+              </button>
+            ))
+          )}
 
           {/* Gemini Recruiter Reply Classification Panel */}
           <section className="card stack" style={{ marginTop: 12 }}>
@@ -393,126 +510,156 @@ export function Outreach() {
         <section className="card">
           <div className="between">
             <h2 style={{ margin: 0 }}>Draft preview</h2>
-            <span className="badge">
-              {activeProvider === 'dify'
-                ? 'Dify Agent 2 Draft'
-                : activeProvider === 'gemini'
-                  ? 'Gemini Fallback Draft'
-                  : isDemo
-                    ? 'Sample email'
-                    : 'Draft email'}
-            </span>
+            <div className="row" style={{ gap: 6 }}>
+              {contact && !isDemo && (
+                <button
+                  type="button"
+                  className="button"
+                  style={{ fontSize: 11, color: '#a85649' }}
+                  onClick={handleDeleteSelectedContact}
+                  title="Delete Contact"
+                >
+                  <Trash2 size={12} />
+                </button>
+              )}
+              <span className="badge">
+                {activeProvider === 'dify'
+                  ? 'Dify Agent 2 Draft'
+                  : activeProvider === 'gemini'
+                    ? 'Gemini Fallback Draft'
+                    : isDemo
+                      ? 'Sample email'
+                      : 'Draft email'}
+              </span>
+            </div>
           </div>
 
           {contact ? (
             <>
               <p className="muted" style={{ marginTop: 22, fontSize: 12 }}>
-                To: <strong>{contact.email}</strong>
-                <br />
-                Subject: {editedSubject || `Exploring opportunities at ${contact.company}`}
+                To: <strong>{contact.email}</strong> ({contact.name} · {contact.company})
               </p>
 
-              {outreachResult ? (
-                <div className="stack" style={{ gap: 10, marginTop: 12 }}>
-                  <label className="field">
-                    Subject Line (Editable)
-                    <input
-                      type="text"
-                      value={editedSubject}
-                      onChange={(e) => setEditedSubject(e.target.value)}
-                    />
-                  </label>
-                  <label className="field">
-                    Email Body (Editable)
-                    <textarea
-                      rows={8}
-                      value={editedBody}
-                      onChange={(e) => setEditedBody(e.target.value)}
-                    />
-                  </label>
-
-                  {outreachResult.personalization_evidence?.length > 0 && (
-                    <div style={{ fontSize: 11, color: '#555' }}>
-                      <strong>Personalization Evidence:</strong>
-                      <ul style={{ paddingLeft: 16, margin: '2px 0' }}>
-                        {outreachResult.personalization_evidence.map((ev, i) => (
-                          <li key={i}>{ev}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {outreachResult.recommended_action === 'stop' && (
-                    <div className="notice" style={{ color: '#d32f2f', fontWeight: 600 }}>
-                      STOP Directive: Dify Agent 2 identified an opt-out. Outreach must not be sent.
-                    </div>
-                  )}
-
-                  <div
-                    className="card stack"
-                    style={{
-                      background: '#f4f7f0',
-                      border: '1px solid #789966',
-                      padding: 12,
-                      marginTop: 8,
+              <div className="stack" style={{ gap: 10, marginTop: 12 }}>
+                <label className="field">
+                  Subject Line (Editable)
+                  <input
+                    type="text"
+                    value={editedSubject}
+                    onChange={(e) => {
+                      setEditedSubject(e.target.value);
+                      if (draftApproved) setDraftApproved(false);
                     }}
-                  >
-                    <div className="row" style={{ color: '#27694e' }}>
-                      <ShieldAlert size={15} />
-                      <strong style={{ fontSize: 12 }}>Candidate Approval Required</strong>
-                    </div>
-                    <label className="check" style={{ fontSize: 12 }}>
-                      <input
-                        type="checkbox"
-                        checked={draftApproved}
-                        onChange={(e) => setDraftApproved(e.target.checked)}
-                      />{' '}
-                      I have reviewed and approve this recruiter outreach draft.
-                    </label>
+                  />
+                </label>
+                <label className="field">
+                  Email Body (Editable)
+                  <textarea
+                    rows={8}
+                    value={editedBody}
+                    placeholder="Click 'Generate Recruiter Email' or type your draft here…"
+                    onChange={(e) => {
+                      setEditedBody(e.target.value);
+                      if (draftApproved) setDraftApproved(false);
+                    }}
+                  />
+                </label>
 
-                    <div className="row" style={{ marginTop: 8, gap: 8 }}>
+                {outreachResult?.personalization_evidence && outreachResult.personalization_evidence.length > 0 && (
+                  <div style={{ fontSize: 11, color: '#555' }}>
+                    <strong>Personalization Evidence:</strong>
+                    <ul style={{ paddingLeft: 16, margin: '2px 0' }}>
+                      {outreachResult.personalization_evidence.map((ev, i) => (
+                        <li key={i}>{ev}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {outreachResult?.recommended_action === 'stop' && (
+                  <div className="notice" style={{ color: '#d32f2f', fontWeight: 600 }}>
+                    STOP Directive: Dify Agent 2 identified an opt-out. Outreach must not be sent.
+                  </div>
+                )}
+
+                {contact.isSuppressed && (
+                  <div className="notice" style={{ color: '#d32f2f', fontWeight: 600 }}>
+                    Contact Suppressed: Recruiter has opted out ({contact.suppressionReason || 'Opt-out'}). Sending is disabled.
+                  </div>
+                )}
+
+                <div
+                  className="card stack"
+                  style={{
+                    background: '#f4f7f0',
+                    border: '1px solid #789966',
+                    padding: 12,
+                    marginTop: 8,
+                  }}
+                >
+                  <div className="row" style={{ color: '#27694e' }}>
+                    <ShieldAlert size={15} />
+                    <strong style={{ fontSize: 12 }}>Candidate Approval Required</strong>
+                  </div>
+                  <label className="check" style={{ fontSize: 12 }}>
+                    <input
+                      type="checkbox"
+                      checked={draftApproved}
+                      disabled={contact.isSuppressed || outreachResult?.recommended_action === 'stop' || !editedBody.trim()}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setDraftApproved(checked);
+                        if (checked) {
+                          // Simple client-side hash fingerprint of recipient|subject|body
+                          setApprovedHash(`${contact.email.toLowerCase().trim()}|${editedSubject.trim()}|${editedBody.trim()}`);
+                        } else {
+                          setApprovedHash(null);
+                        }
+                      }}
+                    />{' '}
+                    I have reviewed and approve this exact recruiter outreach draft.
+                  </label>
+
+                  <div className="row" style={{ marginTop: 8, gap: 8 }}>
+                    <button
+                      type="button"
+                      className="button"
+                      disabled={savingDraft || !editedBody.trim()}
+                      onClick={handleSaveDraft}
+                    >
+                      {savingDraft ? 'Saving…' : 'Save Draft to Database'}
+                    </button>
+
+                    {!isDemo && (
                       <button
                         type="button"
-                        className="button"
-                        disabled={savingDraft}
-                        onClick={handleSaveDraft}
+                        className="button primary"
+                        disabled={!draftApproved || !gmailConnected || contact.isSuppressed || outreachResult?.recommended_action === 'stop'}
+                        onClick={() => setShowConfirmModal(true)}
                       >
-                        {savingDraft ? 'Saving…' : 'Save Draft to Database'}
+                        <Send size={13} /> Approve & Send via Gmail
                       </button>
-
-                      {!isDemo && (
-                        <button
-                          type="button"
-                          className="button primary"
-                          disabled={!draftApproved || !gmailConnected || outreachResult.recommended_action === 'stop'}
-                          onClick={() => setShowConfirmModal(true)}
-                        >
-                          <Send size={13} /> Approve & Send via Gmail
-                        </button>
-                      )}
-                    </div>
+                    )}
                   </div>
                 </div>
-              ) : (
-                <div className="email-preview">{contact.draft || 'Draft content will appear here.'}</div>
-              )}
+              </div>
 
               {sentResult && (
                 <div className="notice" style={{ background: '#eaf4ea', borderColor: '#789966', color: '#27694e', marginTop: 12 }}>
-                  <ShieldCheck size={16} /> <strong>Email Delivered:</strong> Gmail Message ID {sentResult.gmailMessageId} recorded in database.
+                  <ShieldCheck size={16} /> <strong>Email Accepted by Gmail:</strong> Message ID {sentResult.gmailMessageId} recorded in Supabase.
                 </div>
               )}
             </>
           ) : (
             <p className="muted" style={{ marginTop: 22 }}>
-              No recruiter contacts available. Add contacts to preview outreach drafts.
+              No recruiter contact selected. Choose or add a contact to draft outreach.
             </p>
           )}
 
           <div className="row" style={{ marginTop: 20, flexWrap: 'wrap', gap: 10 }}>
             <button
               className="button primary"
-              disabled={generatingDraft}
+              disabled={generatingDraft || !contact}
               onClick={generateOutreachEmail}
             >
               <Bot size={15} />
@@ -527,6 +674,109 @@ export function Outreach() {
           )}
         </section>
       </div>
+
+      {/* Add Recruiter Contact Modal */}
+      {showAddContactModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 20,
+          }}
+        >
+          <div
+            className="card stack"
+            style={{
+              maxWidth: 480,
+              width: '100%',
+              background: '#fff',
+              border: '1px solid #789966',
+              padding: 24,
+            }}
+          >
+            <div className="between">
+              <div className="row" style={{ color: '#27694e' }}>
+                <UserPlus size={20} />
+                <h3 style={{ margin: 0 }}>Add Recruiter Contact</h3>
+              </div>
+              <button
+                type="button"
+                className="button"
+                style={{ padding: '2px 8px', fontSize: 12 }}
+                onClick={() => setShowAddContactModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateContact} className="stack" style={{ gap: 10, marginTop: 12 }}>
+              <label className="field">
+                Recruiter Name *
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Sarah Connor"
+                  value={newContactName}
+                  onChange={(e) => setNewContactName(e.target.value)}
+                />
+              </label>
+              <label className="field">
+                Email Address *
+                <input
+                  type="email"
+                  required
+                  placeholder="e.g. sarah@novalabs.ai"
+                  value={newContactEmail}
+                  onChange={(e) => setNewContactEmail(e.target.value)}
+                />
+              </label>
+              <label className="field">
+                Company
+                <input
+                  type="text"
+                  placeholder="e.g. Nova Labs"
+                  value={newContactCompany}
+                  onChange={(e) => setNewContactCompany(e.target.value)}
+                />
+              </label>
+              <label className="field">
+                Role / Title
+                <input
+                  type="text"
+                  placeholder="e.g. Technical Recruiter"
+                  value={newContactRole}
+                  onChange={(e) => setNewContactRole(e.target.value)}
+                />
+              </label>
+
+              {contactError && (
+                <p className="notice" role="alert" style={{ color: '#a85649', fontSize: 12 }}>
+                  {contactError}
+                </p>
+              )}
+
+              <div className="row" style={{ marginTop: 12, justifyContent: 'flex-end', gap: 8 }}>
+                <button
+                  type="button"
+                  className="button"
+                  disabled={savingContact}
+                  onClick={() => setShowAddContactModal(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="button primary" disabled={savingContact}>
+                  {savingContact ? 'Saving…' : 'Save Recruiter Contact'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Explicit Final Confirmation Modal for Gmail Sending */}
       {showConfirmModal && contact && (

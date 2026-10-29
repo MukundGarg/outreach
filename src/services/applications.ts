@@ -14,6 +14,7 @@ import {
   type CandidateProfile,
   type Preferences,
   type ApplicationStatus,
+  type RecruiterContact,
 } from '@/lib/domain';
 import type { Database } from '@/lib/supabase/database.types';
 
@@ -257,23 +258,112 @@ export async function transitionApplication(
 
 // ---------------- Contacts ----------------
 
-export async function listContacts() {
+export async function listContacts(): Promise<RecruiterContact[]> {
   const { db, user } = await authenticatedDatabase();
-  const { data, error } = await db
+  const { data: contacts, error } = await db
     .from('recruiter_contacts')
     .select('*')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false });
 
   if (error) throw error;
-  return (data || []).map((c) => ({
-    id: c.id,
-    name: c.name,
-    company: c.company || '',
-    email: c.email,
-    role: c.role || '',
-    status: 'draft' as const,
+  if (!contacts || contacts.length === 0) return [];
+
+  // Fetch campaigns and latest drafts for each contact
+  const contactIds = contacts.map((c) => c.id);
+  const { data: campaigns } = await db
+    .from('outreach_campaigns')
+    .select('id, recruiter_contact_id, status')
+    .eq('user_id', user.id)
+    .in('recruiter_contact_id', contactIds);
+
+  const campaignMap = new Map<string, { id: string; status: string }>();
+  for (const camp of campaigns || []) {
+    campaignMap.set(camp.recruiter_contact_id, { id: camp.id, status: camp.status });
+  }
+
+  // Fetch latest email messages for these campaigns
+  const campaignIds = (campaigns || []).map((c) => c.id);
+  const messagesMap = new Map<string, { body: string; subject: string; status: string }>();
+  if (campaignIds.length > 0) {
+    const { data: messages } = await db
+      .from('email_messages')
+      .select('campaign_id, body, subject, status, created_at')
+      .eq('user_id', user.id)
+      .in('campaign_id', campaignIds)
+      .order('created_at', { ascending: false });
+
+    for (const msg of messages || []) {
+      if (!messagesMap.has(msg.campaign_id)) {
+        messagesMap.set(msg.campaign_id, { body: msg.body, subject: msg.subject, status: msg.status });
+      }
+    }
+  }
+
+  return contacts.map((c) => {
+    const camp = campaignMap.get(c.id);
+    const msg = camp ? messagesMap.get(camp.id) : undefined;
+    return {
+      id: c.id,
+      name: c.name,
+      company: c.company || '',
+      email: c.email,
+      role: c.role || '',
+      status: (camp?.status as RecruiterContact['status']) || 'draft',
+      draft: msg?.body || '',
+      followup: '',
+      isSuppressed: c.is_suppressed || false,
+      suppressionReason: c.suppression_reason || undefined,
+    };
+  });
+}
+
+export async function createContact(input: {
+  name: string;
+  email: string;
+  company?: string;
+  role?: string;
+}): Promise<RecruiterContact> {
+  const { db, user } = await authenticatedDatabase();
+  const { data, error } = await db
+    .from('recruiter_contacts')
+    .insert({
+      user_id: user.id,
+      name: input.name.trim(),
+      email: input.email.toLowerCase().trim(),
+      company: input.company?.trim() || null,
+      role: input.role?.trim() || null,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    if (error.code === '23505') {
+      throw new Error(`A recruiter contact with email "${input.email}" already exists.`);
+    }
+    throw error;
+  }
+
+  return {
+    id: data.id,
+    name: data.name,
+    company: data.company || '',
+    email: data.email,
+    role: data.role || '',
+    status: 'draft',
     draft: '',
     followup: '',
-  }));
+    isSuppressed: false,
+  };
+}
+
+export async function deleteContact(id: string): Promise<void> {
+  const { db, user } = await authenticatedDatabase();
+  const { error } = await db
+    .from('recruiter_contacts')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', user.id);
+
+  if (error) throw error;
 }

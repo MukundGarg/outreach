@@ -34,6 +34,7 @@ export async function sendUserApprovedEmail(params: {
   subject: string;
   body: string;
   approvalConfirmed: boolean;
+  expectedApprovedHash?: string;
   operationKey?: string;
 }): Promise<SendEmailResult> {
   const { db, user } = await authenticatedDatabase();
@@ -45,6 +46,7 @@ export async function sendUserApprovedEmail(params: {
     subject,
     body,
     approvalConfirmed,
+    expectedApprovedHash,
     operationKey = crypto.randomUUID(),
   } = params;
 
@@ -72,13 +74,20 @@ export async function sendUserApprovedEmail(params: {
     throw new Error('Recruiter contact not found or access denied.');
   }
 
+  // Safety check: Destination email MUST strictly match the owned recruiter contact
+  if (contact.email.toLowerCase().trim() !== cleanRecipient) {
+    throw new Error(
+      `Recipient email "${cleanRecipient}" does not match the contact record email "${contact.email}".`,
+    );
+  }
+
   if (contact.is_suppressed) {
     throw new Error(
       `Cannot send email: Recruiter contact is marked as OPT-OUT / SUPPRESSED (${contact.suppression_reason || 'Opt-out'}). All further outreach is blocked.`,
     );
   }
 
-  // 4. Verify campaign ownership
+  // 4. Verify campaign ownership and ensure campaign belongs to THIS contact
   const { data: campaign, error: campErr } = await db
     .from('outreach_campaigns')
     .select('id, recruiter_contact_id')
@@ -90,8 +99,18 @@ export async function sendUserApprovedEmail(params: {
     throw new Error('Outreach campaign not found or access denied.');
   }
 
-  // 5. Content fingerprinting
+  if (campaign.recruiter_contact_id !== contactId) {
+    throw new Error('Campaign does not belong to the selected recruiter contact.');
+  }
+
+  // 5. Content fingerprinting and approval hash validation
   const contentHash = calculateContentHash(cleanRecipient, subject, body);
+  if (expectedApprovedHash && expectedApprovedHash !== contentHash) {
+    throw new Error(
+      'Draft content has changed since approval was granted. Please re-review and approve the updated draft.',
+    );
+  }
+
   const approvedAt = new Date().toISOString();
 
   // 6. Record or fetch existing email_messages row with idempotency_key
@@ -110,7 +129,7 @@ export async function sendUserApprovedEmail(params: {
         sentAt: existingMsg.sent_at || existingMsg.created_at,
       };
     }
-    throw new Error('This email is currently in progress. Please wait for completion.');
+    throw new Error('This email transmission is currently in progress. Please wait for completion.');
   }
 
   // 7. Get valid sender Gmail access token
@@ -141,23 +160,35 @@ export async function sendUserApprovedEmail(params: {
     }
     messageRecordId = inserted.id;
   } else {
-    await db
+    const { error: appErr } = await db
       .from('email_messages')
       .update({
         status: 'approved',
         approved_at: approvedAt,
         approved_content_hash: contentHash,
       })
-      .eq('id', messageRecordId);
+      .eq('id', messageRecordId)
+      .eq('user_id', user.id);
+
+    if (appErr) {
+      throw new Error(`Failed to update message to approved status: ${appErr.message}`);
+    }
   }
 
-  // 9. Mark status as 'sending'
-  await db
+  // 9. Atomic transition: mark status as 'sending' only if currently 'approved' or 'draft'
+  const { data: lockRow, error: lockErr } = await db
     .from('email_messages')
     .update({ status: 'sending' })
-    .eq('id', messageRecordId);
+    .eq('id', messageRecordId)
+    .in('status', ['draft', 'approved'])
+    .select('id')
+    .single();
 
-  // 10. Build RFC 5322 MIME message & send to Gmail API
+  if (lockErr || !lockRow) {
+    throw new Error('Could not acquire sending lock on message draft. It may already be sending.');
+  }
+
+  // 10. Build RFC 5322 MIME message & send to Gmail API with strict 30s timeout
   const rawRfc = buildRfc5322Message({
     from: senderEmail,
     to: cleanRecipient,
@@ -165,6 +196,9 @@ export async function sendUserApprovedEmail(params: {
     body,
   });
   const encodedRaw = base64UrlEncode(rawRfc);
+
+  const controller = new AbortController();
+  const sendTimeout = setTimeout(() => controller.abort(), 30000);
 
   try {
     const gmailRes = await fetch(GMAIL_SEND_URL, {
@@ -174,7 +208,10 @@ export async function sendUserApprovedEmail(params: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ raw: encodedRaw }),
+      signal: controller.signal,
     });
+
+    clearTimeout(sendTimeout);
 
     if (!gmailRes.ok) {
       const errBody = await gmailRes.text().catch(() => '');
@@ -194,7 +231,7 @@ export async function sendUserApprovedEmail(params: {
     const sentAt = new Date().toISOString();
 
     // 11. Update message as sent with Gmail IDs
-    await db
+    const { error: sentUpdateErr } = await db
       .from('email_messages')
       .update({
         status: 'sent',
@@ -203,6 +240,10 @@ export async function sendUserApprovedEmail(params: {
         sent_at: sentAt,
       })
       .eq('id', messageRecordId);
+
+    if (sentUpdateErr) {
+      throw new Error(`Email sent by Gmail API (ID: ${gmailData.id}) but failed to update database status: ${sentUpdateErr.message}`);
+    }
 
     // Update campaign status to 'sent'
     await db
@@ -217,19 +258,31 @@ export async function sendUserApprovedEmail(params: {
       sentAt,
     };
   } catch (sendErr: unknown) {
+    clearTimeout(sendTimeout);
+    const isTimeout =
+      (sendErr instanceof Error && sendErr.name === 'AbortError') ||
+      String(sendErr).toLowerCase().includes('timeout');
+
+    const errCategory = isTimeout ? 'DELIVERY_UNCONFIRMED_TIMEOUT' : 'SEND_EXCEPTION';
     const errText = sendErr instanceof Error ? sendErr.message : String(sendErr);
-    // If error was not already handled
+
     try {
       await db
         .from('email_messages')
         .update({
           status: 'failed',
-          send_error_category: 'SEND_EXCEPTION',
+          send_error_category: errCategory,
           send_error_details: errText.slice(0, 500),
         })
         .eq('id', messageRecordId);
     } catch {
-      // Best-effort error recording
+      // Best-effort database recording
+    }
+
+    if (isTimeout) {
+      throw new Error(
+        'Gmail request timed out after 30 seconds. The delivery outcome is unconfirmed. Do not resend without reconciling Gmail status.',
+      );
     }
 
     throw sendErr;

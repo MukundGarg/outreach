@@ -41,6 +41,8 @@ export interface UnifiedWorkspaceContext {
   ) => Promise<void> | void;
   uploadResumeFile?: (file: File) => Promise<void>;
   deleteUserResume?: (id: string) => Promise<void>;
+  addContact?: (input: { name: string; email: string; company?: string; role?: string }) => Promise<RecruiterContact>;
+  deleteContact?: (id: string) => Promise<void>;
   resetDemo?: () => void;
 }
 
@@ -77,6 +79,8 @@ export function useWorkspace(overrideIsDemo?: boolean): UnifiedWorkspaceContext 
       transition: auth.transition,
       uploadResumeFile: auth.uploadResumeFile,
       deleteUserResume: auth.deleteUserResume,
+      addContact: auth.addContact,
+      deleteContact: auth.deleteContact,
     };
   }
 }
