@@ -285,6 +285,25 @@ export function Outreach() {
     setSendingEmail(true);
     setMessage('');
     try {
+      // 1. Ensure server-persisted approval record exists with exact subject and body
+      const approvalRes = await fetch('/api/outreach/drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contactId: contact.id,
+          subject: editedSubject,
+          body: editedBody,
+          approved: true,
+        }),
+      });
+      const approvalPayload = await approvalRes.json();
+      if (!approvalRes.ok || !approvalPayload.ok) {
+        throw new Error(approvalPayload.error || 'Failed to verify server-persisted draft approval.');
+      }
+
+      const verifiedHash = approvalPayload.data?.approvedContentHash || approvedHash;
+
+      // 2. Dispatch send request with verified approval
       const res = await fetch('/api/outreach/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -294,7 +313,7 @@ export function Outreach() {
           subject: editedSubject,
           body: editedBody,
           approvalConfirmed: true,
-          expectedApprovedHash: approvedHash || undefined,
+          expectedApprovedHash: verifiedHash || undefined,
         }),
       });
       const payload = await res.json();
@@ -630,14 +649,46 @@ export function Outreach() {
                       type="checkbox"
                       checked={draftApproved}
                       disabled={contact.isSuppressed || outreachResult?.recommended_action === 'stop' || !editedBody.trim()}
-                      onChange={(e) => {
+                      onChange={async (e) => {
                         const checked = e.target.checked;
                         setDraftApproved(checked);
                         if (checked) {
-                          // Simple client-side hash fingerprint of recipient|subject|body
-                          setApprovedHash(`${contact.email.toLowerCase().trim()}|${editedSubject.trim()}|${editedBody.trim()}`);
+                          const clientHash = `${contact.email.toLowerCase().trim()}|${editedSubject.trim()}|${editedBody.trim()}`;
+                          setApprovedHash(clientHash);
+                          if (!isDemo) {
+                            try {
+                              const res = await fetch('/api/outreach/drafts', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  contactId: contact.id,
+                                  subject: editedSubject,
+                                  body: editedBody,
+                                  approved: true,
+                                }),
+                              });
+                              const payload = await res.json();
+                              if (payload.ok && payload.data?.approvedContentHash) {
+                                setApprovedHash(payload.data.approvedContentHash);
+                              }
+                            } catch {
+                              // If background server persistence fails, sending will safely catch and report error
+                            }
+                          }
                         } else {
                           setApprovedHash(null);
+                          if (!isDemo) {
+                            fetch('/api/outreach/drafts', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                contactId: contact.id,
+                                subject: editedSubject,
+                                body: editedBody,
+                                approved: false,
+                              }),
+                            }).catch(() => {});
+                          }
                         }
                       }}
                     />{' '}

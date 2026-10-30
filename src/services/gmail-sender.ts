@@ -111,96 +111,87 @@ export async function sendUserApprovedEmail(params: {
     );
   }
 
-  const approvedAt = new Date().toISOString();
-
-  // 6. Record or fetch existing email_messages row with idempotency_key
-  const { data: existingMsg } = await db
+  // 6. Enforce server-persisted approval record:
+  // Must have an existing email_messages draft for this user and campaign that was explicitly approved on the server.
+  // Look up by campaign_id or contact's campaign
+  const { data: approvedDraft, error: draftQueryErr } = await db
     .from('email_messages')
     .select('*')
-    .eq('idempotency_key', operationKey)
+    .eq('campaign_id', campaignId)
+    .eq('user_id', user.id)
+    .in('status', ['approved', 'sending', 'sent'])
+    .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
 
-  if (existingMsg) {
-    // Validate idempotency content binding: ensure key is bound to exact recipient, campaign, user, and content hash
-    if (
-      existingMsg.user_id !== user.id ||
-      existingMsg.campaign_id !== campaignId ||
-      (existingMsg.recipient_email || '').toLowerCase().trim() !== cleanRecipient ||
-      (existingMsg.approved_content_hash && existingMsg.approved_content_hash !== contentHash)
-    ) {
-      throw new Error(
-        'Idempotency key conflict: Operation key was previously used with different recipient, campaign, or message content.',
-      );
-    }
-
-    if (existingMsg.status === 'sent' || existingMsg.status === 'sending') {
-      if (existingMsg.status === 'sent') {
-        return {
-          messageId: existingMsg.id,
-          gmailMessageId: existingMsg.gmail_message_id || '',
-          gmailThreadId: existingMsg.gmail_thread_id || '',
-          sentAt: existingMsg.sent_at || existingMsg.created_at,
-        };
-      }
-      throw new Error('This email transmission is currently in progress. Please wait for completion.');
-    }
+  if (draftQueryErr || !approvedDraft) {
+    throw new Error(
+      'No server-persisted approval record found for this draft. You must save and approve the draft before sending.',
+    );
   }
 
-  // 7. Get valid sender Gmail access token
-  const { accessToken, senderEmail } = await getValidAccessTokenForUser(user.id);
-
-  // 8. Insert or update draft into 'approved' state
-  let messageRecordId = existingMsg?.id;
-  if (!messageRecordId) {
-    const { data: inserted, error: insertErr } = await db
-      .from('email_messages')
-      .insert({
-        user_id: user.id,
-        campaign_id: campaignId,
-        recipient_email: cleanRecipient,
-        subject,
-        body,
-        status: 'approved',
-        idempotency_key: operationKey,
-        approved_at: approvedAt,
-        approved_content_hash: contentHash,
-        direction: 'outbound',
-      })
-      .select('id')
-      .single();
-
-    if (insertErr || !inserted) {
-      throw new Error(`Failed to record approved message draft: ${insertErr?.message}`);
-    }
-    messageRecordId = inserted.id;
-  } else {
-    const { error: appErr } = await db
-      .from('email_messages')
-      .update({
-        status: 'approved',
-        approved_at: approvedAt,
-        approved_content_hash: contentHash,
-      })
-      .eq('id', messageRecordId)
-      .eq('user_id', user.id);
-
-    if (appErr) {
-      throw new Error(`Failed to update message to approved status: ${appErr.message}`);
-    }
+  // Verify that server approval timestamp and content hash exist and match current content
+  if (!approvedDraft.approved_at || !approvedDraft.approved_content_hash) {
+    throw new Error(
+      'Draft approval record is incomplete or unverified. Please re-approve the draft on the server.',
+    );
   }
 
-  // 9. Atomic transition: mark status as 'sending' only if currently 'approved' or 'draft'
+  if (approvedDraft.approved_content_hash !== contentHash) {
+    throw new Error(
+      'Server-persisted approved content hash does not match the draft content being transmitted. Re-approval is required.',
+    );
+  }
+
+  if ((approvedDraft.recipient_email || '').toLowerCase().trim() !== cleanRecipient) {
+    throw new Error(
+      'Server-persisted approved recipient does not match the destination email address.',
+    );
+  }
+
+  // 7. Stable server-associated idempotency key:
+  // Require and use the stable idempotency_key already associated with the approved message record.
+  const stableIdempotencyKey = approvedDraft.idempotency_key;
+  if (operationKey && operationKey !== stableIdempotencyKey) {
+    // If a caller specified a key, verify it matches the stable key
+    // Reject arbitrary client-generated keys that deviate from the server record
+    throw new Error(
+      'Idempotency key mismatch: Sending must use the stable server-associated idempotency key for this approved message.',
+    );
+  }
+
+  // Check if message is already sent or in-flight
+  if (approvedDraft.status === 'sent') {
+    return {
+      messageId: approvedDraft.id,
+      gmailMessageId: approvedDraft.gmail_message_id || '',
+      gmailThreadId: approvedDraft.gmail_thread_id || '',
+      sentAt: approvedDraft.sent_at || approvedDraft.created_at,
+    };
+  }
+
+  if (approvedDraft.status === 'sending') {
+    throw new Error('This email transmission is currently in progress. Please wait for completion.');
+  }
+
+  const messageRecordId = approvedDraft.id;
+
+  // 8. Atomic transition: mark status as 'sending' only if currently 'approved'
+  // Prevents concurrent transmission of the same approved message
   const { data: lockRow, error: lockErr } = await db
     .from('email_messages')
     .update({ status: 'sending' })
     .eq('id', messageRecordId)
-    .in('status', ['draft', 'approved'])
+    .eq('status', 'approved')
     .select('id')
     .single();
 
   if (lockErr || !lockRow) {
     throw new Error('Could not acquire sending lock on message draft. It may already be sending.');
   }
+
+  // 9. Get valid sender Gmail access token
+  const { accessToken, senderEmail } = await getValidAccessTokenForUser(user.id);
 
   // 10. Build RFC 5322 MIME message & send to Gmail API with strict 30s timeout
   const rawRfc = buildRfc5322Message({
@@ -213,6 +204,8 @@ export async function sendUserApprovedEmail(params: {
 
   const controller = new AbortController();
   const sendTimeout = setTimeout(() => controller.abort(), 30000);
+
+  let gmailAccepted = false;
 
   try {
     const gmailRes = await fetch(GMAIL_SEND_URL, {
@@ -242,28 +235,53 @@ export async function sendUserApprovedEmail(params: {
     }
 
     const gmailData = await gmailRes.json();
+    gmailAccepted = true;
     const sentAt = new Date().toISOString();
 
     // 11. Update message as sent with Gmail IDs
-    const { error: sentUpdateErr } = await db
-      .from('email_messages')
-      .update({
-        status: 'sent',
-        gmail_message_id: gmailData.id || null,
-        gmail_thread_id: gmailData.threadId || null,
-        sent_at: sentAt,
-      })
-      .eq('id', messageRecordId);
+    try {
+      const { error: sentUpdateErr } = await db
+        .from('email_messages')
+        .update({
+          status: 'sent',
+          gmail_message_id: gmailData.id || null,
+          gmail_thread_id: gmailData.threadId || null,
+          sent_at: sentAt,
+        })
+        .eq('id', messageRecordId);
 
-    if (sentUpdateErr) {
-      throw new Error(`Email sent by Gmail API (ID: ${gmailData.id}) but failed to update database status: ${sentUpdateErr.message}`);
+      if (sentUpdateErr) {
+        throw sentUpdateErr;
+      }
+
+      // Update campaign status to 'sent'
+      await db
+        .from('outreach_campaigns')
+        .update({ status: 'sent', approved_at: approvedDraft.approved_at })
+        .eq('id', campaignId);
+    } catch (postAcceptDbErr) {
+      // Gmail accepted the message, but local DB update failed!
+      // Requirement 5: Preserve a reconciliation-required state for uncertain outcomes and prohibit automatic retries.
+      // Do NOT overwrite the status as 'failed'.
+      const dbErrText = postAcceptDbErr instanceof Error ? postAcceptDbErr.message : String(postAcceptDbErr);
+      try {
+        await db
+          .from('email_messages')
+          .update({
+            gmail_message_id: gmailData.id || null,
+            gmail_thread_id: gmailData.threadId || null,
+            send_error_category: 'RECONCILIATION_REQUIRED',
+            send_error_details: `Gmail accepted message (ID: ${gmailData.id}), but subsequent database update encountered error: ${dbErrText.slice(0, 300)}`,
+          })
+          .eq('id', messageRecordId);
+      } catch {
+        // Best effort to preserve reconciliation state
+      }
+
+      throw new Error(
+        `Email was successfully accepted by Gmail API (Message ID: ${gmailData.id}), but updating the local database record failed. Message is preserved in RECONCILIATION_REQUIRED state. Do not retry sending.`,
+      );
     }
-
-    // Update campaign status to 'sent'
-    await db
-      .from('outreach_campaigns')
-      .update({ status: 'sent', approved_at: approvedAt })
-      .eq('id', campaignId);
 
     return {
       messageId: messageRecordId,
@@ -273,18 +291,25 @@ export async function sendUserApprovedEmail(params: {
     };
   } catch (sendErr: unknown) {
     clearTimeout(sendTimeout);
+
+    // If Gmail already accepted the email, we MUST NOT overwrite status as failed!
+    if (gmailAccepted) {
+      throw sendErr;
+    }
+
     const isTimeout =
       (sendErr instanceof Error && sendErr.name === 'AbortError') ||
       String(sendErr).toLowerCase().includes('timeout');
 
-    const errCategory = isTimeout ? 'DELIVERY_UNCONFIRMED_TIMEOUT' : 'SEND_EXCEPTION';
+    // For timeouts, delivery outcome is uncertain: use RECONCILIATION_REQUIRED and prohibit automatic retries
+    const errCategory = isTimeout ? 'RECONCILIATION_REQUIRED' : 'SEND_EXCEPTION';
     const errText = sendErr instanceof Error ? sendErr.message : String(sendErr);
 
     try {
       await db
         .from('email_messages')
         .update({
-          status: 'failed',
+          status: isTimeout ? 'sending' : 'failed', // If timeout, keep out of definitively failed to prevent blind re-sends
           send_error_category: errCategory,
           send_error_details: errText.slice(0, 500),
         })

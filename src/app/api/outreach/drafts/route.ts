@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { authenticatedDatabase } from '@/services/applications';
+import { calculateContentHash } from '@/lib/email-utils';
 import { demoEnabled } from '@/lib/demo';
 
 const draftSaveSchema = z.object({
@@ -8,6 +9,7 @@ const draftSaveSchema = z.object({
   subject: z.string().min(1).max(300),
   body: z.string().min(1).max(20000),
   applicationId: z.string().uuid().optional(),
+  approved: z.boolean().optional(),
 });
 
 export async function POST(request: Request) {
@@ -30,18 +32,25 @@ export async function POST(request: Request) {
       );
     }
 
-    const { contactId, subject, body, applicationId } = parsed.data;
+    const { contactId, subject, body, applicationId, approved } = parsed.data;
 
-    // Verify contact ownership
+    // Verify contact ownership and non-suppression
     const { data: contact, error: cErr } = await db
       .from('recruiter_contacts')
-      .select('id, email, name')
+      .select('id, email, name, is_suppressed, suppression_reason')
       .eq('id', contactId)
       .eq('user_id', user.id)
       .single();
 
     if (cErr || !contact) {
       return NextResponse.json({ ok: false, error: 'Recruiter contact not found' }, { status: 404 });
+    }
+
+    if (approved && contact.is_suppressed) {
+      return NextResponse.json(
+        { ok: false, error: `Cannot approve draft: Recruiter contact is marked as OPT-OUT / SUPPRESSED (${contact.suppression_reason || 'Opt-out'}).` },
+        { status: 400 },
+      );
     }
 
     // Upsert or retrieve active campaign for this contact
@@ -73,19 +82,26 @@ export async function POST(request: Request) {
       campaignId = newCamp.id;
     }
 
+    // Calculate content hash
+    const cleanRecipient = contact.email.toLowerCase().trim();
+    const contentHash = calculateContentHash(cleanRecipient, subject, body);
+    const approvedAt = approved ? new Date().toISOString() : null;
+    const targetStatus = approved ? 'approved' : 'draft';
+
     // Save or update draft email message (prevent uncontrolled duplicate drafts)
     const { data: existingDraft } = await db
       .from('email_messages')
-      .select('id')
+      .select('id, idempotency_key')
       .eq('campaign_id', campaignId)
       .eq('user_id', user.id)
-      .eq('status', 'draft')
+      .in('status', ['draft', 'approved'])
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
     let draftMessageId: string;
     let draftCreatedAt: string;
+    let stableIdempotencyKey: string;
 
     if (existingDraft) {
       const { data: updated, error: updateErr } = await db
@@ -93,12 +109,15 @@ export async function POST(request: Request) {
         .update({
           subject,
           body,
-          recipient_email: contact.email,
+          recipient_email: cleanRecipient,
+          status: targetStatus,
+          approved_at: approvedAt,
+          approved_content_hash: approved ? contentHash : null,
           updated_at: new Date().toISOString(),
         })
         .eq('id', existingDraft.id)
         .eq('user_id', user.id)
-        .select('id, created_at, status')
+        .select('id, created_at, status, idempotency_key')
         .single();
 
       if (updateErr || !updated) {
@@ -106,19 +125,22 @@ export async function POST(request: Request) {
       }
       draftMessageId = updated.id;
       draftCreatedAt = updated.created_at;
+      stableIdempotencyKey = updated.idempotency_key;
     } else {
       const { data: inserted, error: msgErr } = await db
         .from('email_messages')
         .insert({
           user_id: user.id,
           campaign_id: campaignId,
-          recipient_email: contact.email,
+          recipient_email: cleanRecipient,
           subject,
           body,
-          status: 'draft',
+          status: targetStatus,
+          approved_at: approvedAt,
+          approved_content_hash: approved ? contentHash : null,
           direction: 'outbound',
         })
-        .select('id, created_at, status')
+        .select('id, created_at, status, idempotency_key')
         .single();
 
       if (msgErr || !inserted) {
@@ -126,6 +148,7 @@ export async function POST(request: Request) {
       }
       draftMessageId = inserted.id;
       draftCreatedAt = inserted.created_at;
+      stableIdempotencyKey = inserted.idempotency_key;
     }
 
     return NextResponse.json({
@@ -134,6 +157,10 @@ export async function POST(request: Request) {
         draftId: draftMessageId,
         campaignId,
         createdAt: draftCreatedAt,
+        status: targetStatus,
+        approvedAt,
+        approvedContentHash: approved ? contentHash : null,
+        idempotencyKey: stableIdempotencyKey,
       },
     });
   } catch (err: unknown) {

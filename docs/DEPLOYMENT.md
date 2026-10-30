@@ -22,16 +22,16 @@ Configure the following variables in **Vercel Project Settings > Environment Var
 | Variable | Description | Exposed to Browser? | Example / Format |
 |---|---|---|---|
 | `NEXT_PUBLIC_DEMO_MODE` | Set to `false` for authenticated production mode | Yes (`NEXT_PUBLIC_`) | `false` |
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL | Yes (`NEXT_PUBLIC_`) | `https://xyzcompany.supabase.co` |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase publishable anonymous key | Yes (`NEXT_PUBLIC_`) | `sb_publishable_...` |
-| `GEMINI_API_KEY` | Google Gemini API Key | **NO (Server-only)** | `AIzaSy...` |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL | Yes (`NEXT_PUBLIC_`) | `https://your-project.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase publishable anonymous key | Yes (`NEXT_PUBLIC_`) | `your-supabase-publishable-key` |
+| `GEMINI_API_KEY` | Google Gemini API Key | **NO (Server-only)** | `your-gemini-api-key` |
 | `DIFY_API_BASE_URL` | Base URL for Dify API | **NO (Server-only)** | `https://api.dify.ai/v1` |
-| `DIFY_APPLICATION_API_KEY` | Dify API key for Agent 1 (Application Intelligence) | **NO (Server-only)** | `app-...` |
-| `DIFY_OUTREACH_API_KEY` | Dify API key for Agent 2 (Recruiter Outreach) | **NO (Server-only)** | `app-...` |
-| `GOOGLE_OAUTH_CLIENT_ID` | Google Cloud OAuth Client ID | **NO (Server-only)** | `123...apps.googleusercontent.com` |
-| `GOOGLE_OAUTH_CLIENT_SECRET` | Google Cloud OAuth Client Secret | **NO (Server-only)** | `GOCSPX-...` |
+| `DIFY_APPLICATION_API_KEY` | Dify API key for Agent 1 (Application Intelligence) | **NO (Server-only)** | `app-your-dify-app-key` |
+| `DIFY_OUTREACH_API_KEY` | Dify API key for Agent 2 (Recruiter Outreach) | **NO (Server-only)** | `app-your-dify-outreach-key` |
+| `GOOGLE_OAUTH_CLIENT_ID` | Google Cloud OAuth Client ID | **NO (Server-only)** | `your-client-id.apps.googleusercontent.com` |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | Google Cloud OAuth Client Secret | **NO (Server-only)** | `your-google-oauth-client-secret` |
 | `GOOGLE_OAUTH_REDIRECT_URI` | Production OAuth Callback URL | **NO (Server-only)** | `https://your-domain.vercel.app/api/integrations/gmail/callback` |
-| `GMAIL_TOKEN_ENCRYPTION_KEY` | 32-byte (64 hex characters) encryption key for tokens | **NO (Server-only)** | 64-character hexadecimal string |
+| `GMAIL_TOKEN_ENCRYPTION_KEY` | 32-byte (64 hex characters) encryption key for tokens | **NO (Server-only)** | `64-character-hex-string` |
 
 > [!IMPORTANT]
 > **Zero Secrets in Browser**: Never prefix `GEMINI_API_KEY`, `DIFY_*`, `GOOGLE_OAUTH_*`, or `GMAIL_TOKEN_ENCRYPTION_KEY` with `NEXT_PUBLIC_`. These are server-only secrets used in secure Node.js API routes.
@@ -41,8 +41,15 @@ Configure the following variables in **Vercel Project Settings > Environment Var
 ## 3. Supabase Database & Migration Setup
 
 Run the migrations in sequential order against your Supabase database:
-1. `supabase/migrations/202610290001_foundation.sql` (Creates `candidate_profiles`, `candidate_preferences`, `resumes`, `job_applications`, `application_events`, and RLS policies).
-2. `supabase/migrations/202610300001_gmail_oauth_sending.sql` (Creates `recruiter_contacts`, `outreach_campaigns`, `email_messages`, `gmail_tokens`, `followup_schedules`, unique idempotency keys, and RLS policies).
+1. `supabase/migrations/202610290001_foundation.sql`:
+   - Creates foundation tables: `profiles`, `candidate_preferences`, `resumes`, `job_applications`, `application_events`, `recruiter_contacts`, `outreach_campaigns`, `email_messages`, `followup_schedules`, and `agent_runs`.
+   - Defines types: `application_status`, `outreach_status`.
+   - Enables Row Level Security (RLS) on all tables with owner-isolated policies (`auth.uid() = user_id` / `auth.uid() = id`).
+   - Sets up triggers (`touch_updated_at`) and performance indexes.
+2. `supabase/migrations/202610300001_gmail_oauth_sending.sql`:
+   - Creates `gmail_oauth_connections` table with RLS for storing encrypted OAuth tokens and expiration.
+   - Extends `recruiter_contacts` with opt-out suppression columns: `is_suppressed`, `suppression_reason`, `suppressed_at`.
+   - Extends `email_messages` with `recipient_email`, `approved_content_hash`, `send_error_category`, and `send_error_details`.
 
 ### Storage Bucket Configuration:
 - Create private bucket: `resumes`

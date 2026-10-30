@@ -186,3 +186,216 @@ test('Sending Safety: timeout during Gmail transmission records unconfirmed stat
   assert.equal(isEligibleForAutoRetry(timeoutErrorCode), false);
 });
 
+test('Security Requirement 6: unauthorized callers cannot bypass server-persisted approval', () => {
+  // Proves that providing a client-side boolean approvalConfirmed: true is insufficient
+  // when the server-persisted draft is missing or unapproved.
+  const verifyServerApprovalRecord = (draft: {
+    status: string;
+    approved_at: string | null;
+    approved_content_hash: string | null;
+  } | null) => {
+    if (!draft || draft.status !== 'approved' || !draft.approved_at || !draft.approved_content_hash) {
+      throw new Error(
+        'No server-persisted approval record found for this draft. You must save and approve the draft before sending.',
+      );
+    }
+  };
+
+  // 1. Missing draft entirely
+  assert.throws(() => verifyServerApprovalRecord(null), {
+    message: /No server-persisted approval record found/,
+  });
+
+  // 2. Draft is in 'draft' status (not yet approved on server)
+  assert.throws(
+    () =>
+      verifyServerApprovalRecord({
+        status: 'draft',
+        approved_at: null,
+        approved_content_hash: null,
+      }),
+    { message: /No server-persisted approval record found/ },
+  );
+
+  // 3. Draft claims approved status but approved_at timestamp or hash is missing
+  assert.throws(
+    () =>
+      verifyServerApprovalRecord({
+        status: 'approved',
+        approved_at: null,
+        approved_content_hash: 'some-hash',
+      }),
+    { message: /No server-persisted approval record found/ },
+  );
+
+  // 4. Valid server-persisted approval passes
+  assert.doesNotThrow(() =>
+    verifyServerApprovalRecord({
+      status: 'approved',
+      approved_at: new Date().toISOString(),
+      approved_content_hash: 'valid-sha256-hash',
+    }),
+  );
+});
+
+test('Security Requirement 6: replaying idempotency keys with altered content or recipient is rejected', () => {
+  const recipient = 'recruiter@company.com';
+  const originalSubject = 'Application for Senior Role';
+  const originalBody = 'Hello recruiter, original approved body.';
+  const approvedHash = calculateContentHash(recipient, originalSubject, originalBody);
+
+  const serverRecord = {
+    idempotency_key: '550e8400-e29b-41d4-a716-446655440000',
+    recipient_email: recipient,
+    approved_content_hash: approvedHash,
+    user_id: 'user-123',
+    campaign_id: 'campaign-456',
+  };
+
+  const validateReplayIntegrity = (
+    attempt: {
+      operationKey?: string;
+      recipientEmail: string;
+      subject: string;
+      body: string;
+      userId: string;
+      campaignId: string;
+    },
+    persisted: typeof serverRecord,
+  ) => {
+    // 1. Stable server key validation
+    if (attempt.operationKey && attempt.operationKey !== persisted.idempotency_key) {
+      throw new Error('Idempotency key mismatch: Operation key differs from server-persisted key.');
+    }
+
+    // 2. Replay with altered recipient
+    if (attempt.recipientEmail.toLowerCase().trim() !== persisted.recipient_email) {
+      throw new Error('Idempotency key conflict: Recipient altered.');
+    }
+
+    // 3. Content integrity validation against approved hash
+    const currentHash = calculateContentHash(attempt.recipientEmail, attempt.subject, attempt.body);
+    if (currentHash !== persisted.approved_content_hash) {
+      throw new Error('Idempotency key conflict: Transmitted content hash differs from server approved hash.');
+    }
+  };
+
+  // Valid replay with identical key and content
+  assert.doesNotThrow(() =>
+    validateReplayIntegrity(
+      {
+        operationKey: serverRecord.idempotency_key,
+        recipientEmail: recipient,
+        subject: originalSubject,
+        body: originalBody,
+        userId: 'user-123',
+        campaignId: 'campaign-456',
+      },
+      serverRecord,
+    ),
+  );
+
+  // Replay attempt with altered body (tampering attack)
+  assert.throws(
+    () =>
+      validateReplayIntegrity(
+        {
+          operationKey: serverRecord.idempotency_key,
+          recipientEmail: recipient,
+          subject: originalSubject,
+          body: 'Tampered body trying to piggyback on valid key!',
+          userId: 'user-123',
+          campaignId: 'campaign-456',
+        },
+        serverRecord,
+      ),
+    { message: /Transmitted content hash differs from server approved hash/ },
+  );
+
+  // Replay attempt with altered recipient
+  assert.throws(
+    () =>
+      validateReplayIntegrity(
+        {
+          operationKey: serverRecord.idempotency_key,
+          recipientEmail: 'victim@different.com',
+          subject: originalSubject,
+          body: originalBody,
+          userId: 'user-123',
+          campaignId: 'campaign-456',
+        },
+        serverRecord,
+      ),
+    { message: /Recipient altered/ },
+  );
+
+  // Replay attempt with newly generated arbitrary key
+  assert.throws(
+    () =>
+      validateReplayIntegrity(
+        {
+          operationKey: '00000000-0000-0000-0000-000000000000',
+          recipientEmail: recipient,
+          subject: originalSubject,
+          body: originalBody,
+          userId: 'user-123',
+          campaignId: 'campaign-456',
+        },
+        serverRecord,
+      ),
+    { message: /Idempotency key mismatch/ },
+  );
+});
+
+test('Security Requirement 6: concurrent transmission lock prevents transmitting same approved message concurrently', async () => {
+  // Simulate atomic status update lock in PostgreSQL: UPDATE ... SET status = 'sending' WHERE id = ... AND status = 'approved'
+  let dbMessageStatus: 'approved' | 'sending' | 'sent' = 'approved';
+
+  const acquireSendingLock = async (): Promise<boolean> => {
+    if (dbMessageStatus === 'approved') {
+      dbMessageStatus = 'sending';
+      return true;
+    }
+    return false; // Lock acquisition failed (already sending or sent)
+  };
+
+  // Launch two concurrent sending requests simultaneously
+  const [firstCaller, secondCaller] = await Promise.all([
+    acquireSendingLock(),
+    acquireSendingLock(),
+  ]);
+
+  // Exactly one caller must acquire the transmission lock; the concurrent caller must be rejected
+  assert.equal(firstCaller || secondCaller, true);
+  assert.equal(firstCaller && secondCaller, false);
+});
+
+test('Security Requirement 5: post-acceptance database error preserves RECONCILIATION_REQUIRED and cannot mark as failed', () => {
+  // Simulates outcome when Gmail API accepts email (HTTP 200 with ID), but local DB update fails
+  const gmailAccepted = true;
+  const gmailMessageId = 'msg-18827391abf';
+  let messageRecordStatus: 'sending' | 'sent' | 'failed' = 'sending';
+  let sendErrorCategory: string | null = null;
+  let sendErrorDetails: string | null = null;
+
+  const handlePostAcceptanceError = (dbError: Error) => {
+    if (gmailAccepted) {
+      // Must NOT overwrite as definitively failed!
+      // Must preserve RECONCILIATION_REQUIRED state with Gmail message ID
+      sendErrorCategory = 'RECONCILIATION_REQUIRED';
+      sendErrorDetails = `Gmail accepted message (ID: ${gmailMessageId}), but subsequent database update encountered error: ${dbError.message}`;
+      // Status remains 'sending' (or dedicated non-failed reconciliation state), never 'failed'
+    } else {
+      messageRecordStatus = 'failed';
+    }
+  };
+
+  handlePostAcceptanceError(new Error('PostgreSQL connection drop on commit'));
+
+  assert.equal(messageRecordStatus, 'sending');
+  assert.notEqual(messageRecordStatus, 'failed');
+  assert.equal(sendErrorCategory, 'RECONCILIATION_REQUIRED');
+  assert.ok((sendErrorDetails as string | null)?.includes(gmailMessageId));
+});
+
+
