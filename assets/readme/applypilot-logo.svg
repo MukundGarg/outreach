@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 64" width="320" height="64">
+  <defs>
+    <linearGradient id="logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2d7759" />
+      <stop offset="100%" stop-color="#1e543e" />
+    </linearGradient>
+  </defs>
+  <!-- Brand icon -->
+  <rect x="8" y="10" width="44" height="44" rx="13" fill="url(#logo-grad)" />
+  <g fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" transform="translate(16, 18)">
+    <circle cx="14" cy="14" r="12" />
+    <polygon points="17.5 10.5 15.5 15.5 10.5 17.5 12.5 12.5 17.5 10.5" fill="#ffffff" fill-opacity="0.25" stroke="#ffffff" />
+  </g>
+  <!-- Wordmark -->
+  <text x="64" y="41" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="26" font-weight="800" letter-spacing="-0.8" fill="#20352e">
+    ApplyPilot
+  </text>
+  <!-- AI pill/muted label -->
+  <text x="210" y="41" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="500" letter-spacing="0.5" fill="#738078">
+    AI
+  </text>
+</svg>
