@@ -302,13 +302,17 @@ export function Outreach() {
       }
 
       const verifiedHash = approvalPayload.data?.approvedContentHash || approvedHash;
+      const approvedDraftId = approvalPayload.data?.draftId;
+      const verifiedCampaignId = approvalPayload.data?.campaignId;
 
-      // 2. Dispatch send request with verified approval
+      // 2. Dispatch send request with verified approval bound to the specific draft
       const res = await fetch('/api/outreach/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contactId: contact.id,
+          campaignId: verifiedCampaignId,
+          draftId: approvedDraftId,
           recipientEmail: contact.email,
           subject: editedSubject,
           body: editedBody,

@@ -61,3 +61,12 @@ npm run build
 ```
 
 All quality gates pass cleanly.
+
+9. **Security Hardening — Gmail Transmission Integrity & Concurrency Repairs (PASS)**:
+   - **Uncertain Transmission Guard**: Prohibits creating or sending a new approved draft for a campaign while an earlier transmission has an uncertain outcome (`sending` or `RECONCILIATION_REQUIRED`), requiring explicit reconciliation.
+   - **Conditional Status Updates**: Draft updates are constrained by `in('status', ['draft', 'approved'])` to prevent concurrent saves from regressing in-flight messages back from `sending` to `approved`.
+   - **Trigger Consistency**: Outreach campaigns transition through `draft -> awaiting_approval -> scheduled -> sent` aligned with PostgreSQL `guard_outreach_state()` trigger, and update errors are strictly asserted.
+   - **Conservative Network Error Handling**: Any socket hangup, connection reset, timeout, or abort during or after Gmail request dispatch is preserved as `RECONCILIATION_REQUIRED` and kept in `sending` status, preventing duplicate sends.
+   - **Gmail Message ID Verification**: Verified that Gmail API response contains a valid non-empty message ID string before recording acceptance.
+   - **Draft Binding**: Approval and sending endpoints strictly bind the authenticated draft (`draftId`), recipient, content hash, and stable server idempotency key.
+   - **Integration Tests**: Added `tests/gmail-transmission-integrity.test.ts` testing actual service and database contracts across all 6 integrity scenarios.

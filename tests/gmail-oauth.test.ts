@@ -28,14 +28,16 @@ test('Encryption: fails if ciphertext or auth tag is tampered with', () => {
   const encrypted = encryptToken(secretToken);
   const [ivHex, tagHex, dataHex] = encrypted.split(':');
 
-  // Tampered ciphertext
-  const tamperedCipher = `${ivHex}:${tagHex}:${'00' + dataHex.slice(2)}`;
+  // Tampered ciphertext (guaranteed to differ via bitwise XOR)
+  const firstDataByte = (parseInt(dataHex.slice(0, 2), 16) ^ 0xff).toString(16).padStart(2, '0');
+  const tamperedCipher = `${ivHex}:${tagHex}:${firstDataByte}${dataHex.slice(2)}`;
   assert.throws(() => {
     decryptToken(tamperedCipher);
   });
 
-  // Tampered auth tag
-  const tamperedTag = `${ivHex}:${'00' + tagHex.slice(2)}:${dataHex}`;
+  // Tampered auth tag (guaranteed to differ via bitwise XOR)
+  const firstTagByte = (parseInt(tagHex.slice(0, 2), 16) ^ 0xff).toString(16).padStart(2, '0');
+  const tamperedTag = `${ivHex}:${firstTagByte}${tagHex.slice(2)}:${dataHex}`;
   assert.throws(() => {
     decryptToken(tamperedTag);
   });

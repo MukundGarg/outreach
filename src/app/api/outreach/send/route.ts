@@ -7,6 +7,7 @@ import { demoEnabled } from '@/lib/demo';
 const sendEmailRequestSchema = z.object({
   contactId: z.string().uuid(),
   campaignId: z.string().uuid().optional(),
+  draftId: z.string().uuid().optional(),
   recipientEmail: z.string().email(),
   subject: z.string().min(1).max(300),
   body: z.string().min(1).max(20000),
@@ -45,6 +46,7 @@ export async function POST(request: Request) {
     const {
       contactId,
       campaignId: explicitCampaignId,
+      draftId,
       recipientEmail,
       subject,
       body,
@@ -87,6 +89,7 @@ export async function POST(request: Request) {
     const result = await sendUserApprovedEmail({
       campaignId,
       contactId,
+      draftId,
       recipientEmail,
       subject,
       body,

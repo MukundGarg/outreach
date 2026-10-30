@@ -147,11 +147,15 @@ export async function refreshAccessToken(refreshTokenPlain: string): Promise<{
   };
 }
 
-/**
- * Gets a valid access token for the authenticated user, refreshing if expired.
- */
-export async function getValidAccessTokenForUser(userId: string): Promise<{ accessToken: string; senderEmail: string }> {
-  const { db } = await authenticatedDatabase();
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Database } from '@/lib/supabase/database.types';
+
+export async function getValidAccessTokenForUser(
+  userId: string,
+  dbClient?: SupabaseClient<Database> | unknown,
+): Promise<{ accessToken: string; senderEmail: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = (dbClient as any) || (await authenticatedDatabase()).db;
 
   const { data: conn, error } = await db
     .from('gmail_oauth_connections')

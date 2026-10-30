@@ -27,17 +27,25 @@ export interface SendEmailResult {
 /**
  * Sends an email via Gmail API with explicit user approval validation, recipient suppression check, and idempotency protection.
  */
-export async function sendUserApprovedEmail(params: {
-  campaignId: string;
-  contactId: string;
-  recipientEmail: string;
-  subject: string;
-  body: string;
-  approvalConfirmed: boolean;
-  expectedApprovedHash?: string;
-  operationKey?: string;
-}): Promise<SendEmailResult> {
-  const { db, user } = await authenticatedDatabase();
+export async function sendUserApprovedEmail(
+  params: {
+    campaignId: string;
+    contactId: string;
+    recipientEmail: string;
+    subject: string;
+    body: string;
+    approvalConfirmed: boolean;
+    draftId?: string;
+    expectedApprovedHash?: string;
+    operationKey?: string;
+  },
+  clientOverride?: {
+    db: unknown;
+    user: { id: string; email?: string };
+  },
+): Promise<SendEmailResult> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { db, user } = (clientOverride as any) || (await authenticatedDatabase());
 
   const {
     campaignId,
@@ -46,6 +54,7 @@ export async function sendUserApprovedEmail(params: {
     subject,
     body,
     approvalConfirmed,
+    draftId,
     expectedApprovedHash,
     operationKey = crypto.randomUUID(),
   } = params;
@@ -90,7 +99,7 @@ export async function sendUserApprovedEmail(params: {
   // 4. Verify campaign ownership and ensure campaign belongs to THIS contact
   const { data: campaign, error: campErr } = await db
     .from('outreach_campaigns')
-    .select('id, recruiter_contact_id')
+    .select('id, status, recruiter_contact_id')
     .eq('id', campaignId)
     .eq('user_id', user.id)
     .single();
@@ -103,6 +112,22 @@ export async function sendUserApprovedEmail(params: {
     throw new Error('Campaign does not belong to the selected recruiter contact.');
   }
 
+  // Requirement 1: Prevent new approved email send while an earlier transmission has an uncertain outcome
+  const { data: uncertainTransmission } = await db
+    .from('email_messages')
+    .select('id, status, send_error_category')
+    .eq('campaign_id', campaignId)
+    .eq('user_id', user.id)
+    .or('status.eq.sending,send_error_category.eq.RECONCILIATION_REQUIRED')
+    .limit(1)
+    .maybeSingle();
+
+  if (uncertainTransmission) {
+    throw new Error(
+      'Cannot send email: An earlier transmission for this campaign has an uncertain delivery outcome and requires reconciliation before any new attempt.',
+    );
+  }
+
   // 5. Content fingerprinting and approval hash validation
   const contentHash = calculateContentHash(cleanRecipient, subject, body);
   if (expectedApprovedHash && expectedApprovedHash !== contentHash) {
@@ -113,21 +138,32 @@ export async function sendUserApprovedEmail(params: {
 
   // 6. Enforce server-persisted approval record:
   // Must have an existing email_messages draft for this user and campaign that was explicitly approved on the server.
-  // Look up by campaign_id or contact's campaign
-  const { data: approvedDraft, error: draftQueryErr } = await db
+  // Requirement 6: Bind approval to a specific authenticated draft (draftId) if provided
+  let draftQuery = db
     .from('email_messages')
     .select('*')
     .eq('campaign_id', campaignId)
-    .eq('user_id', user.id)
-    .in('status', ['approved', 'sending', 'sent'])
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .eq('user_id', user.id);
+
+  if (draftId) {
+    draftQuery = draftQuery.eq('id', draftId);
+  } else {
+    draftQuery = draftQuery
+      .in('status', ['approved', 'sending', 'sent'])
+      .order('created_at', { ascending: false })
+      .limit(1);
+  }
+
+  const { data: approvedDraft, error: draftQueryErr } = await draftQuery.maybeSingle();
 
   if (draftQueryErr || !approvedDraft) {
     throw new Error(
       'No server-persisted approval record found for this draft. You must save and approve the draft before sending.',
     );
+  }
+
+  if (draftId && approvedDraft.id !== draftId) {
+    throw new Error('Draft ID mismatch: the approved draft does not match the requested draft identifier.');
   }
 
   // Verify that server approval timestamp and content hash exist and match current content
@@ -190,8 +226,29 @@ export async function sendUserApprovedEmail(params: {
     throw new Error('Could not acquire sending lock on message draft. It may already be sending.');
   }
 
+  // Requirement 3: Ensure campaign state transition to 'scheduled' adheres strictly to guard_outreach_state()
+  // Campaign transition graph: draft -> awaiting_approval -> scheduled -> sent
+  if (campaign.status === 'draft') {
+    const { error: awaitErr } = await db
+      .from('outreach_campaigns')
+      .update({ status: 'awaiting_approval' })
+      .eq('id', campaignId);
+    if (awaitErr) {
+      throw new Error(`Failed to advance campaign state to awaiting_approval: ${awaitErr.message}`);
+    }
+  }
+
+  const { error: schedErr } = await db
+    .from('outreach_campaigns')
+    .update({ status: 'scheduled', approved_at: approvedDraft.approved_at })
+    .eq('id', campaignId);
+
+  if (schedErr) {
+    throw new Error(`Failed to advance campaign state to scheduled: ${schedErr.message}`);
+  }
+
   // 9. Get valid sender Gmail access token
-  const { accessToken, senderEmail } = await getValidAccessTokenForUser(user.id);
+  const { accessToken, senderEmail } = await getValidAccessTokenForUser(user.id, db);
 
   // 10. Build RFC 5322 MIME message & send to Gmail API with strict 30s timeout
   const rawRfc = buildRfc5322Message({
@@ -206,8 +263,10 @@ export async function sendUserApprovedEmail(params: {
   const sendTimeout = setTimeout(() => controller.abort(), 30000);
 
   let gmailAccepted = false;
+  let rawFetchDispatched = false;
 
   try {
+    rawFetchDispatched = true;
     const gmailRes = await fetch(GMAIL_SEND_URL, {
       method: 'POST',
       headers: {
@@ -222,6 +281,7 @@ export async function sendUserApprovedEmail(params: {
 
     if (!gmailRes.ok) {
       const errBody = await gmailRes.text().catch(() => '');
+      // Definite non-2xx HTTP response from Google server: request was processed and rejected
       await db
         .from('email_messages')
         .update({
@@ -234,7 +294,12 @@ export async function sendUserApprovedEmail(params: {
       throw new Error(`Gmail API returned error ${gmailRes.status}: ${errBody}`);
     }
 
-    const gmailData = await gmailRes.json();
+    // Requirement 5: Verify successful Gmail response contains a valid non-empty string message ID before recording acceptance
+    const gmailData = await gmailRes.json().catch(() => null);
+    if (!gmailData || typeof gmailData.id !== 'string' || !gmailData.id.trim()) {
+      throw new Error('Invalid Gmail API response: missing confirmed message ID');
+    }
+
     gmailAccepted = true;
     const sentAt = new Date().toISOString();
 
@@ -244,8 +309,8 @@ export async function sendUserApprovedEmail(params: {
         .from('email_messages')
         .update({
           status: 'sent',
-          gmail_message_id: gmailData.id || null,
-          gmail_thread_id: gmailData.threadId || null,
+          gmail_message_id: gmailData.id,
+          gmail_thread_id: typeof gmailData.threadId === 'string' ? gmailData.threadId : null,
           sent_at: sentAt,
         })
         .eq('id', messageRecordId);
@@ -254,11 +319,15 @@ export async function sendUserApprovedEmail(params: {
         throw sentUpdateErr;
       }
 
-      // Update campaign status to 'sent'
-      await db
+      // Update campaign status to 'sent' (transitioning from 'scheduled' to 'sent')
+      const { error: campSentErr } = await db
         .from('outreach_campaigns')
         .update({ status: 'sent', approved_at: approvedDraft.approved_at })
         .eq('id', campaignId);
+
+      if (campSentErr) {
+        throw campSentErr;
+      }
     } catch (postAcceptDbErr) {
       // Gmail accepted the message, but local DB update failed!
       // Requirement 5: Preserve a reconciliation-required state for uncertain outcomes and prohibit automatic retries.
@@ -268,8 +337,8 @@ export async function sendUserApprovedEmail(params: {
         await db
           .from('email_messages')
           .update({
-            gmail_message_id: gmailData.id || null,
-            gmail_thread_id: gmailData.threadId || null,
+            gmail_message_id: gmailData.id,
+            gmail_thread_id: typeof gmailData.threadId === 'string' ? gmailData.threadId : null,
             send_error_category: 'RECONCILIATION_REQUIRED',
             send_error_details: `Gmail accepted message (ID: ${gmailData.id}), but subsequent database update encountered error: ${dbErrText.slice(0, 300)}`,
           })
@@ -297,19 +366,21 @@ export async function sendUserApprovedEmail(params: {
       throw sendErr;
     }
 
-    const isTimeout =
-      (sendErr instanceof Error && sendErr.name === 'AbortError') ||
-      String(sendErr).toLowerCase().includes('timeout');
-
-    // For timeouts, delivery outcome is uncertain: use RECONCILIATION_REQUIRED and prohibit automatic retries
-    const errCategory = isTimeout ? 'RECONCILIATION_REQUIRED' : 'SEND_EXCEPTION';
+    // Requirement 4: Ensure ANY network error after a Gmail send request may have been transmitted
+    // is treated conservatively as an uncertain outcome (RECONCILIATION_REQUIRED), not automatically safe to retry.
+    // If the error occurred after raw fetch dispatch (timeout, socket hangup, conn reset, abort, fetch failed),
+    // we cannot be certain Google did not receive and send the email.
     const errText = sendErr instanceof Error ? sendErr.message : String(sendErr);
+    const isDefiniteHttpRejection = errText.startsWith('Gmail API returned error');
+
+    const isUncertainNetworkOutcome = rawFetchDispatched && !isDefiniteHttpRejection;
+    const errCategory = isUncertainNetworkOutcome ? 'RECONCILIATION_REQUIRED' : 'SEND_EXCEPTION';
 
     try {
       await db
         .from('email_messages')
         .update({
-          status: isTimeout ? 'sending' : 'failed', // If timeout, keep out of definitively failed to prevent blind re-sends
+          status: isUncertainNetworkOutcome ? 'sending' : 'failed', // Keep out of definitively failed to prevent blind re-sends
           send_error_category: errCategory,
           send_error_details: errText.slice(0, 500),
         })
@@ -318,9 +389,9 @@ export async function sendUserApprovedEmail(params: {
       // Best-effort database recording
     }
 
-    if (isTimeout) {
+    if (isUncertainNetworkOutcome) {
       throw new Error(
-        'Gmail request timed out after 30 seconds. The delivery outcome is unconfirmed. Do not resend without reconciling Gmail status.',
+        `Gmail transmission network error (${errText}). The delivery outcome is unconfirmed. Message is preserved in an uncertain state requiring reconciliation. Do not resend without reconciling Gmail status.`,
       );
     }
 
