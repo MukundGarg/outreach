@@ -6,3 +6,17 @@ node_modules/
 coverage/
 playwright-report/
 test-results/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Archives & backups
+*.zip
+*.tar.gz
+*.tgz
+*.bak
+
+# Temporary handoff / staging packages
+ApplyPilot_README_*
+internal-*/
