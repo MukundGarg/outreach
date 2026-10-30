@@ -120,16 +120,30 @@ export async function sendUserApprovedEmail(params: {
     .eq('idempotency_key', operationKey)
     .maybeSingle();
 
-  if (existingMsg && (existingMsg.status === 'sent' || existingMsg.status === 'sending')) {
-    if (existingMsg.status === 'sent') {
-      return {
-        messageId: existingMsg.id,
-        gmailMessageId: existingMsg.gmail_message_id || '',
-        gmailThreadId: existingMsg.gmail_thread_id || '',
-        sentAt: existingMsg.sent_at || existingMsg.created_at,
-      };
+  if (existingMsg) {
+    // Validate idempotency content binding: ensure key is bound to exact recipient, campaign, user, and content hash
+    if (
+      existingMsg.user_id !== user.id ||
+      existingMsg.campaign_id !== campaignId ||
+      (existingMsg.recipient_email || '').toLowerCase().trim() !== cleanRecipient ||
+      (existingMsg.approved_content_hash && existingMsg.approved_content_hash !== contentHash)
+    ) {
+      throw new Error(
+        'Idempotency key conflict: Operation key was previously used with different recipient, campaign, or message content.',
+      );
     }
-    throw new Error('This email transmission is currently in progress. Please wait for completion.');
+
+    if (existingMsg.status === 'sent' || existingMsg.status === 'sending') {
+      if (existingMsg.status === 'sent') {
+        return {
+          messageId: existingMsg.id,
+          gmailMessageId: existingMsg.gmail_message_id || '',
+          gmailThreadId: existingMsg.gmail_thread_id || '',
+          sentAt: existingMsg.sent_at || existingMsg.created_at,
+        };
+      }
+      throw new Error('This email transmission is currently in progress. Please wait for completion.');
+    }
   }
 
   // 7. Get valid sender Gmail access token

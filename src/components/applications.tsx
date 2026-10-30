@@ -544,9 +544,26 @@ export function ApplicationDetail({ id }: { id: string }) {
                     <tbody>
                       {difyAppResult.field_mappings.map((m, idx) => (
                         <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
-                          <td style={{ padding: '4px 6px', fontWeight: 600 }}>{m.field_name}</td>
-                          <td style={{ padding: '4px 6px' }}>{m.proposed_value}</td>
-                          <td style={{ padding: '4px 6px', color: '#666' }}>{m.evidence}</td>
+                          <td style={{ padding: '6px 8px', fontWeight: 600 }}>{m.field_name}</td>
+                          <td style={{ padding: '6px 8px' }}>
+                            <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                              <span>{m.proposed_value}</span>
+                              <button
+                                type="button"
+                                className="button"
+                                style={{ padding: '2px 6px', fontSize: 11 }}
+                                onClick={() => {
+                                  if (navigator.clipboard) {
+                                    navigator.clipboard.writeText(m.proposed_value);
+                                  }
+                                }}
+                                title="Copy value for application form"
+                              >
+                                Copy
+                              </button>
+                            </div>
+                          </td>
+                          <td style={{ padding: '6px 8px', color: '#666' }}>{m.evidence}</td>
                         </tr>
                       ))}
                     </tbody>

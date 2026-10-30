@@ -7,14 +7,16 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:3005',
     headless: true,
     launchOptions: {
-      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+      executablePath:
+        process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
       args: ['--no-sandbox'],
     },
   },
   webServer: {
     command: 'npx next start -p 3005',
     url: 'http://127.0.0.1:3005',
-    reuseExistingServer: false,
+    reuseExistingServer: true,
     timeout: 60000,
   },
 });

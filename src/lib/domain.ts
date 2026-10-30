@@ -107,6 +107,7 @@ export interface RecruiterContact {
   role: string;
   status: OutreachStatus;
   draft: string;
+  subject?: string;
   followup: string;
   reply?: string;
   isSuppressed?: boolean;

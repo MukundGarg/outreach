@@ -311,6 +311,7 @@ export async function listContacts(): Promise<RecruiterContact[]> {
       role: c.role || '',
       status: (camp?.status as RecruiterContact['status']) || 'draft',
       draft: msg?.body || '',
+      subject: msg?.subject || undefined,
       followup: '',
       isSuppressed: c.is_suppressed || false,
       suppressionReason: c.suppression_reason || undefined,

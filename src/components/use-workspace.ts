@@ -43,6 +43,7 @@ export interface UnifiedWorkspaceContext {
   deleteUserResume?: (id: string) => Promise<void>;
   addContact?: (input: { name: string; email: string; company?: string; role?: string }) => Promise<RecruiterContact>;
   deleteContact?: (id: string) => Promise<void>;
+  updateDraft?: (contactId: string, subject: string, draft: string) => void;
   resetDemo?: () => void;
 }
 
@@ -62,6 +63,7 @@ export function useWorkspace(overrideIsDemo?: boolean): UnifiedWorkspaceContext 
       setPreferences: demo.setPreferences,
       addApplication: demo.addApplication,
       transition: (id, status) => demo.transition(id, status),
+      updateDraft: demo.updateDraft,
       resetDemo: demo.reset,
     };
   } else {

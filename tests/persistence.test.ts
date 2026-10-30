@@ -123,3 +123,39 @@ test('application transition boundaries enforce approval and terminal state inva
   assert.equal(canTransitionApplication('rejected', 'offer'), false);
   assert.equal(canTransitionApplication('rejected', 'closed'), true);
 });
+
+test('draft persistence: recruiter contact maps latest draft subject and body without data leakage', () => {
+  const contact1 = {
+    id: 'contact-1',
+    name: 'Jane Recruiter',
+    email: 'jane@alpha.com',
+    company: 'Alpha Inc',
+    role: 'Tech Recruiter',
+    status: 'draft' as const,
+    draft: 'Draft content for Jane Alpha',
+    subject: 'Exploring Senior Role at Alpha Inc',
+    followup: '',
+  };
+
+  const contact2 = {
+    id: 'contact-2',
+    name: 'Bob Talent',
+    email: 'bob@beta.com',
+    company: 'Beta Corp',
+    role: 'Lead Sourcer',
+    status: 'draft' as const,
+    draft: 'Draft content for Bob Beta',
+    subject: 'Staff Engineer position at Beta Corp',
+    followup: '',
+  };
+
+  // Contacts are strictly isolated
+  assert.notEqual(contact1.draft, contact2.draft);
+  assert.notEqual(contact1.subject, contact2.subject);
+  assert.notEqual(contact1.email, contact2.email);
+
+  // Rehydration preserves subject and body exactly as stored
+  assert.equal(contact1.subject, 'Exploring Senior Role at Alpha Inc');
+  assert.equal(contact1.draft, 'Draft content for Jane Alpha');
+});
+

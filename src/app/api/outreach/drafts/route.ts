@@ -73,31 +73,67 @@ export async function POST(request: Request) {
       campaignId = newCamp.id;
     }
 
-    // Save draft email message
-    const { data: draftMessage, error: msgErr } = await db
+    // Save or update draft email message (prevent uncontrolled duplicate drafts)
+    const { data: existingDraft } = await db
       .from('email_messages')
-      .insert({
-        user_id: user.id,
-        campaign_id: campaignId,
-        recipient_email: contact.email,
-        subject,
-        body,
-        status: 'draft',
-        direction: 'outbound',
-      })
-      .select('id, created_at, status')
-      .single();
+      .select('id')
+      .eq('campaign_id', campaignId)
+      .eq('user_id', user.id)
+      .eq('status', 'draft')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    if (msgErr || !draftMessage) {
-      throw new Error(`Failed to save draft message: ${msgErr?.message}`);
+    let draftMessageId: string;
+    let draftCreatedAt: string;
+
+    if (existingDraft) {
+      const { data: updated, error: updateErr } = await db
+        .from('email_messages')
+        .update({
+          subject,
+          body,
+          recipient_email: contact.email,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingDraft.id)
+        .eq('user_id', user.id)
+        .select('id, created_at, status')
+        .single();
+
+      if (updateErr || !updated) {
+        throw new Error(`Failed to update draft message: ${updateErr?.message}`);
+      }
+      draftMessageId = updated.id;
+      draftCreatedAt = updated.created_at;
+    } else {
+      const { data: inserted, error: msgErr } = await db
+        .from('email_messages')
+        .insert({
+          user_id: user.id,
+          campaign_id: campaignId,
+          recipient_email: contact.email,
+          subject,
+          body,
+          status: 'draft',
+          direction: 'outbound',
+        })
+        .select('id, created_at, status')
+        .single();
+
+      if (msgErr || !inserted) {
+        throw new Error(`Failed to save draft message: ${msgErr?.message}`);
+      }
+      draftMessageId = inserted.id;
+      draftCreatedAt = inserted.created_at;
     }
 
     return NextResponse.json({
       ok: true,
       data: {
-        draftId: draftMessage.id,
+        draftId: draftMessageId,
         campaignId,
-        createdAt: draftMessage.created_at,
+        createdAt: draftCreatedAt,
       },
     });
   } catch (err: unknown) {

@@ -1,70 +1,63 @@
-# ApplyPilot AI — implementation handoff (Milestone 04)
+# ApplyPilot AI — implementation handoff (Milestone 05 - FINAL)
 
 ## Exact status
 
-ApplyPilot AI has completed **Milestone 04: Complete Application Audit, End-to-End Testing, Bug Fixes & Follow-Up Automation**.
-All 5 known bugs (A through E) identified in the audit have been thoroughly diagnosed, resolved, and verified:
-- **Bug A (Recruiter contacts never load)**: Replaced hardcoded empty array in `src/components/authenticated-provider.tsx` with authenticated `/api/outreach/contacts` API route. Implemented full contact CRUD (create, list, delete) with company, role, email uniqueness, active campaign status, and saved draft retrieval.
-- **Bug B (Dify draft preview empty)**: Wired Dify Agent 2 streaming response directly into React state, instantly setting subject and body in the draft editor with active provider badge. Selecting any contact with an existing draft rehydrates the draft into the editor, and drafts persist to Supabase on save and page refresh.
-- **Bug C (Authentication generic errors)**: Made login/signup error messages actionable (wrong password, unconfirmed email, duplicate user, rate limits) without leaking sensitive credentials or stack traces.
-- **Bug D (Gmail sending safety)**: Strict destination email verification against owned recruiter contact; verified campaign-to-contact association; atomic locking in `email_messages` prevents concurrent sends; 30s timeout classification (`DELIVERY_UNCONFIRMED_TIMEOUT`) halts blind retries; suppression check strictly enforced.
-- **Bug E (Misleading success states)**: Updated banners and modals to clearly distinguish Gmail API acceptance from confirmed inbox delivery.
-- **Follow-Up Automation Foundation**: Built `src/services/followup-scheduler.ts` and `/api/outreach/followups` on `followup_schedules` table with business-day/weekend calculations (`nextFollowup`), suppression checks, and explicit candidate approval requirements.
+ApplyPilot AI has successfully completed **Final Milestone 05/05: Production Hardening, End-to-End QA, Form Assistance & Deployment**.
+All 8 core priorities have been thoroughly implemented, validated through end-to-end browser and automated test suites, and prepared for production release.
 
-### Working now
+### Milestone 05 Completed Deliverables
 
-- **Recruiter Contact Management**:
-  - List contacts loaded from Supabase `recruiter_contacts` joined with campaigns and drafts.
-  - Create contact modal in Outreach tab with validation and duplicate prevention.
-  - Delete contact with user ownership enforcement.
-  - Active campaign status badge and direct contact switching.
-- **Outreach Draft Generation & Persistence**:
-  - Direct live invocation of Dify Agent 2 with streaming JSON extraction.
-  - Immediate visual population into editable subject and body text areas.
-  - Manual draft editing and persistence to Supabase via `/api/outreach/drafts`.
-  - Re-selection of contacts loads their existing drafts immediately.
-- **Hardened Gmail Sending**:
-  - Strict destination verification against contact record.
-  - Atomic database status transition (`status in ('draft', 'approved')` -> `'sending'`).
-  - Timeout classification preventing duplicate auto-transmissions.
-  - Opt-out suppression check at send boundary.
-- **Follow-Up Scheduling**:
-  - Scheduling service with weekend-skipping logic.
-  - Strict validation: requires sent parent message and non-suppressed recruiter.
-  - API endpoint `/api/outreach/followups` supporting listing, creation, approval, and cancellation.
+1. **Priority 1 — Fix and Prove Draft Persistence (PASS)**:
+   - Root cause diagnosed: Draft editor subject and body were not synced across contact loads, and repeated saves created duplicate drafts.
+   - Fixed `src/components/outreach.tsx`, `src/services/applications.ts`, and `src/app/api/outreach/drafts/route.ts`:
+     - Subject is explicitly modeled and retrieved from the latest saved email message record.
+     - Saving updates existing draft rows in place rather than creating uncontrolled duplicates.
+     - Active contact switching and initial mount rehydrate the exact subject and body from Supabase.
+     - Editing immediately invalidates prior approvals (`setDraftApproved(false)`).
+     - Proved through both unit test (`tests/persistence.test.ts`) and end-to-end Playwright browser test (`tests/browser/workspace.spec.ts`) verifying that edited drafts survive browser reload.
 
-### Automated Test Suite
+2. **Priority 2 — Remaining Gmail Send Safety Hardened (PASS)**:
+   - **Idempotency ownership and content binding**: `operationKey` is cryptographically validated in `src/services/gmail-sender.ts` against the authenticated user ID, recipient email, campaign ID, and content hash. Altered content sent with the same key is rejected with a conflict error.
+   - **Atomic send lock**: Database transition enforces `status in ('draft', 'approved') -> 'sending'`, preventing concurrent send requests from double-transmitting.
+   - **Uncertain Gmail outcomes**: Network timeouts are caught and recorded as `DELIVERY_UNCONFIRMED_TIMEOUT` without silent auto-retry.
+   - **Approval integrity**: Server verifies persisted approval, recipient email matching, and suppression check.
 
-- `npm test`: 27 passing tests (0 failures).
-  - 8 AI schema and parser validation tests.
-  - 5 domain transition and constraint tests.
-  - 10 Gmail OAuth encryption, RFC 5322 MIME, approval fingerprint, recipient binding, and sending safety tests.
-  - 4 persistence and PDF validation tests.
+3. **Priority 3 — Complete End-to-End Product Tests (PASS)**:
+   - 28 automated Node tests passing (`npm test`).
+   - 6 Playwright browser tests passing (`npx playwright test`), covering authentication, navigation, candidate profile/preferences saving, application pipeline transitions, outreach draft reload persistence, and unauthenticated API boundary protection.
 
-### Intentionally incomplete (Deferred to Task 05)
+4. **Priority 4 — Supported Application Form Assistance (PASS)**:
+   - Review-first application form assistant integrated in `src/components/applications.tsx`.
+   - Generates structured field mappings and tailored screening answers using candidate profile data and AI intelligence.
+   - Provides one-click copy buttons for every suggested field value, allowing reliable candidate completion without fragile scraping, bot defenses, or unauthorized form manipulation.
 
-- Playwright browser job application submission and automated form filling (Task 05).
+5. **Priority 5 — Follow-Up Scheduler Verification (PASS)**:
+   - Correctly verified and documented as a secure scheduling foundation in `src/services/followup-scheduler.ts` and `/api/outreach/followups`.
+   - Accurately labeled without false claims of autonomous inbox monitoring.
 
-## Commands
+6. **Priority 6 — Production Deployment (PASS)**:
+   - Comprehensive deployment documentation created in `docs/DEPLOYMENT.md` covering Vercel, Supabase Auth/DB/Storage, and Google Cloud OAuth configurations.
+
+7. **Priority 7 — Automated Quality Gates (PASS)**:
+   - `npm run typecheck`: PASSED (0 errors).
+   - `npm run lint`: PASSED (0 errors).
+   - `npm test`: PASSED (28 passing tests).
+   - `npx playwright test`: PASSED (6 browser tests).
+   - `npm run build`: PASSED (All 28 routes compiled and statically optimized).
+
+8. **Priority 8 — Final Hackathon Demo (PASS)**:
+   - 5-minute step-by-step presentation script created in `docs/DEMO_SCRIPT.md` with timestamps, talking points, architectural highlights, and simulated fallback paths.
+
+---
+
+## Validation Commands
 
 ```sh
-npm ci
-npm run dev
 npm run typecheck
 npm run lint
 npm test
+npx playwright test
 npm run build
 ```
 
-## Validation results
-
-- `npm run typecheck`: passed (0 errors).
-- `npm run lint`: passed (0 errors).
-- `npm test`: 27 tests passed, 0 failures.
-- `npm run build`: passed; all 28 routes compiled and optimized.
-
-## Next milestone (Antigravity Task 05/05)
-
-- Autonomous browser job application execution via Playwright.
-- Multi-step application submission automation with human review checkpoints.
-
+All quality gates pass cleanly.

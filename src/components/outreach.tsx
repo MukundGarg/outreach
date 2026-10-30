@@ -18,7 +18,7 @@ import type { DifyOutreachIntelligence, ReplyClassification } from '@/lib/ai-sch
 import { useWorkspace } from './use-workspace';
 
 export function Outreach() {
-  const { isDemo, data, addContact, deleteContact } = useWorkspace();
+  const { isDemo, data, addContact, deleteContact, refresh, updateDraft } = useWorkspace();
   const contacts = data.contacts;
   const [selected, setSelected] = useState(contacts[0]?.id || '');
   const [message, setMessage] = useState('');
@@ -58,6 +58,7 @@ export function Outreach() {
   const [replyClassification, setReplyClassification] = useState<ReplyClassification | null>(null);
   const [replyError, setReplyError] = useState('');
 
+  // Active contact selection
   const contact = contacts.find((c) => c.id === selected) || contacts[0];
 
   // Helper to switch contact and initialize draft editor
@@ -67,7 +68,17 @@ export function Outreach() {
     setOutreachResult(null);
     setSentResult(null);
     setEditedBody(newContact.draft || '');
-    setEditedSubject(`Exploring opportunities at ${newContact.company || 'your team'}`);
+    setEditedSubject(newContact.subject || `Exploring opportunities at ${newContact.company || 'your team'}`);
+    setDraftApproved(false);
+    setApprovedHash(null);
+  }
+
+  // Track the contact ID for which edited values apply; when switching or loading, reset if contact changed
+  const [lastContactId, setLastContactId] = useState<string | null>(null);
+  if (contact && contact.id !== lastContactId) {
+    setLastContactId(contact.id);
+    setEditedBody(contact.draft || '');
+    setEditedSubject(contact.subject || `Exploring opportunities at ${contact.company || 'your team'}`);
     setDraftApproved(false);
     setApprovedHash(null);
   }
@@ -234,6 +245,15 @@ export function Outreach() {
     setSavingDraft(true);
     setMessage('');
     try {
+      if (isDemo) {
+        contact.draft = editedBody;
+        contact.subject = editedSubject;
+        if (updateDraft) {
+          updateDraft(contact.id, editedSubject, editedBody);
+        }
+        setMessage('Draft saved in demo mode.');
+        return;
+      }
       const res = await fetch('/api/outreach/drafts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -248,7 +268,11 @@ export function Outreach() {
         throw new Error(payload.error || 'Failed to save draft to database.');
       }
       contact.draft = editedBody;
-      setMessage(isDemo ? 'Draft saved in demo mode.' : 'Email draft saved securely to database.');
+      contact.subject = editedSubject;
+      if (refresh) {
+        await refresh();
+      }
+      setMessage('Email draft saved securely to database.');
     } catch (err: unknown) {
       setMessage(err instanceof Error ? err.message : 'Error saving draft.');
     } finally {

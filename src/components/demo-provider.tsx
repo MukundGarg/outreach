@@ -55,6 +55,7 @@ const snapshotSchema = z.object({
       role: z.string(),
       status: z.enum(outreachStatuses),
       draft: z.string(),
+      subject: z.string().optional(),
       followup: z.string(),
     }),
   ),
@@ -99,6 +100,7 @@ const Context = createContext<{
   setPreferences: (v: Preferences) => void;
   addApplication: (v: unknown) => string;
   transition: (id: string, status: ApplicationStatus) => void;
+  updateDraft?: (contactId: string, subject: string, draft: string) => void;
   reset: () => void;
 } | null>(null);
 export function DemoProvider({ children }: { children: React.ReactNode }) {
@@ -156,6 +158,14 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
           update((d) => ({ ...d, preferences: preferencesSchema.parse(preferences) })),
         addApplication,
         transition,
+        updateDraft: (contactId: string, subject: string, draft: string) => {
+          update((d) => ({
+            ...d,
+            contacts: d.contacts.map((c) =>
+              c.id === contactId ? { ...c, subject, draft } : c,
+            ),
+          }));
+        },
         reset: () => update(() => initial),
       }}
     >
