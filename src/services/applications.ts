@@ -197,7 +197,7 @@ function parseStoredPreparation(
           updatedAt: parsed.updatedAt || parsed.updated_at,
         };
       }
-    } catch {}
+    } catch { }
   }
 
   return null;
@@ -366,11 +366,53 @@ export async function listContacts(): Promise<RecruiterContact[]> {
 
   // Fetch campaigns and latest drafts for each contact
   const contactIds = contacts.map((c) => c.id);
-  const { data: campaigns } = await db
-    .from('outreach_campaigns')
-    .select('*')
-    .eq('user_id', user.id)
-    .in('recruiter_contact_id', contactIds);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let campaigns: any[] = [];
+  try {
+    const { data, error: campError } = await db
+      .from('outreach_campaigns')
+      .select('*')
+      .eq('user_id', user.id)
+      .in('recruiter_contact_id', contactIds);
+
+    if (campError) {
+      // Check if error is due to missing optional lifecycle columns (Postgres error 42703 or column error)
+      const isMissingCol =
+        campError.code === '42703' ||
+        campError.message?.includes('does not exist') ||
+        campError.message?.includes('column');
+
+      if (isMissingCol) {
+        // Fallback to core columns present in the baseline schema
+        const { data: fallbackData, error: fallbackError } = await db
+          .from('outreach_campaigns')
+          .select('id, user_id, application_id, recruiter_contact_id, status, approved_at, created_at, updated_at')
+          .eq('user_id', user.id)
+          .in('recruiter_contact_id', contactIds);
+
+        if (fallbackError) throw fallbackError;
+        campaigns = fallbackData || [];
+      } else {
+        throw campError;
+      }
+    } else {
+      campaigns = data || [];
+    }
+  } catch (err: unknown) {
+    const errorObj = err as { code?: string; message?: string };
+    if (errorObj?.code === '42703' || errorObj?.message?.includes('column') || errorObj?.message?.includes('does not exist')) {
+      const { data: fallbackData, error: fallbackError } = await db
+        .from('outreach_campaigns')
+        .select('id, user_id, application_id, recruiter_contact_id, status, approved_at, created_at, updated_at')
+        .eq('user_id', user.id)
+        .in('recruiter_contact_id', contactIds);
+
+      if (fallbackError) throw fallbackError;
+      campaigns = fallbackData || [];
+    } else {
+      throw err;
+    }
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const campaignMap = new Map<string, any>();
@@ -378,26 +420,120 @@ export async function listContacts(): Promise<RecruiterContact[]> {
     campaignMap.set(camp.recruiter_contact_id, camp);
   }
 
-  // Fetch latest email messages for these campaigns
+  // Fetch email messages for these campaigns
   const campaignIds = (campaigns || []).map((c) => c.id);
-  const messagesMap = new Map<string, { body: string; subject: string; status: string; sent_at?: string; reply_classification?: string }>();
+  interface MessageSummary {
+    initialDraftBody: string;
+    initialDraftSubject?: string;
+    initialSentAt?: string;
+    latestMsgBody: string;
+    latestMsgSubject?: string;
+    latestMsgStatus: string;
+    latestSentAt?: string;
+    latestReplyClassification?: string;
+    latestReplyBody?: string;
+  }
+  const messagesMap = new Map<string, MessageSummary>();
+
   if (campaignIds.length > 0) {
-    const { data: messages } = await db
-      .from('email_messages')
-      .select('campaign_id, body, subject, status, created_at, sent_at, reply_classification')
-      .eq('user_id', user.id)
-      .in('campaign_id', campaignIds)
-      .order('created_at', { ascending: false });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let messages: any[] = [];
+    try {
+      const { data, error: msgError } = await db
+        .from('email_messages')
+        .select('campaign_id, body, subject, status, created_at, sent_at, reply_classification, direction, is_followup')
+        .eq('user_id', user.id)
+        .in('campaign_id', campaignIds)
+        .order('created_at', { ascending: true }); // Process chronologically to find initial outbound, latest activity, and latest reply
+
+      if (msgError) {
+        // If is_followup is missing in older schemas (code 42703), fallback safely
+        const isMissingCol =
+          msgError.code === '42703' ||
+          msgError.message?.includes('does not exist') ||
+          msgError.message?.includes('is_followup');
+
+        if (isMissingCol) {
+          const { data: fallbackMsgs, error: fallbackErr } = await db
+            .from('email_messages')
+            .select('campaign_id, body, subject, status, created_at, sent_at, reply_classification, direction')
+            .eq('user_id', user.id)
+            .in('campaign_id', campaignIds)
+            .order('created_at', { ascending: true });
+
+          if (fallbackErr) throw fallbackErr;
+          messages = fallbackMsgs || [];
+        } else {
+          throw msgError;
+        }
+      } else {
+        messages = data || [];
+      }
+    } catch (err: unknown) {
+      const errorObj = err as { code?: string; message?: string };
+      if (errorObj?.code === '42703' || errorObj?.message?.includes('is_followup') || errorObj?.message?.includes('does not exist')) {
+        const { data: fallbackMsgs, error: fallbackErr } = await db
+          .from('email_messages')
+          .select('campaign_id, body, subject, status, created_at, sent_at, reply_classification, direction')
+          .eq('user_id', user.id)
+          .in('campaign_id', campaignIds)
+          .order('created_at', { ascending: true });
+
+        if (fallbackErr) throw fallbackErr;
+        messages = fallbackMsgs || [];
+      } else {
+        throw err;
+      }
+    }
 
     for (const msg of messages || []) {
-      if (!messagesMap.has(msg.campaign_id)) {
-        messagesMap.set(msg.campaign_id, {
-          body: msg.body,
-          subject: msg.subject,
-          status: msg.status,
-          sent_at: msg.sent_at,
-          reply_classification: msg.reply_classification,
-        });
+      let entry = messagesMap.get(msg.campaign_id);
+      if (!entry) {
+        entry = {
+          initialDraftBody: '',
+          initialDraftSubject: undefined,
+          initialSentAt: undefined,
+          latestMsgBody: msg.body,
+          latestMsgSubject: msg.subject,
+          latestMsgStatus: msg.status,
+          latestSentAt: msg.sent_at || undefined,
+          latestReplyClassification: undefined,
+          latestReplyBody: undefined,
+        };
+        messagesMap.set(msg.campaign_id, entry);
+      }
+
+      // 1. Initial outreach draft preservation:
+      // An outbound message that is not marked as a follow-up (or the earliest outbound message if is_followup is null/undefined)
+      const isOutbound = msg.direction === 'outbound' || !msg.direction;
+      const isExplicitFollowup = msg.is_followup === true;
+      if (isOutbound && !isExplicitFollowup && !entry.initialDraftBody) {
+        entry.initialDraftBody = msg.body;
+        entry.initialDraftSubject = msg.subject || undefined;
+        entry.initialSentAt = msg.sent_at || undefined;
+      }
+
+      // If initial draft is still empty and this is the first outbound message encountered (fallback)
+      if (isOutbound && !entry.initialDraftBody) {
+        entry.initialDraftBody = msg.body;
+        entry.initialDraftSubject = msg.subject || undefined;
+        entry.initialSentAt = msg.sent_at || undefined;
+      }
+
+      // 2. Latest activity tracking (chronologically ordered, so later items update latest)
+      entry.latestMsgBody = msg.body;
+      entry.latestMsgSubject = msg.subject;
+      entry.latestMsgStatus = msg.status;
+      if (msg.sent_at) {
+        entry.latestSentAt = msg.sent_at;
+      }
+
+      // 3. Latest inbound reply tracking (for reply classification & reply info)
+      if (msg.direction === 'inbound') {
+        entry.latestReplyClassification = msg.reply_classification || entry.latestReplyClassification;
+        entry.latestReplyBody = msg.body;
+      } else if (msg.reply_classification) {
+        entry.latestReplyClassification = msg.reply_classification;
       }
     }
   }
@@ -412,20 +548,20 @@ export async function listContacts(): Promise<RecruiterContact[]> {
       email: c.email,
       role: c.role || '',
       status: (camp?.status as RecruiterContact['status']) || 'draft',
-      draft: msg?.body || '',
-      subject: msg?.subject || undefined,
+      draft: msg?.initialDraftBody || (msg?.latestMsgBody && !msg?.latestReplyBody ? msg.latestMsgBody : ''),
+      subject: msg?.initialDraftSubject || undefined,
       followup: camp?.next_followup_at || '',
       isSuppressed: c.is_suppressed || false,
       suppressionReason: c.suppression_reason || undefined,
       campaignId: camp?.id,
-      initialSentAt: msg?.sent_at,
-      followupsSentCount: camp?.followups_sent_count || 0,
-      followupsFailedCount: camp?.followups_failed_count || 0,
-      lastFollowupAt: camp?.last_followup_at,
-      nextFollowupAt: camp?.next_followup_at,
-      maxFollowups: camp?.max_followups ?? 3,
-      autoSendFollowups: camp?.auto_send_followups ?? false,
-      replyClassification: msg?.reply_classification,
+      initialSentAt: msg?.initialSentAt,
+      followupsSentCount: typeof camp?.followups_sent_count === 'number' ? camp.followups_sent_count : 0,
+      followupsFailedCount: typeof camp?.followups_failed_count === 'number' ? camp.followups_failed_count : 0,
+      lastFollowupAt: camp?.last_followup_at ?? null,
+      nextFollowupAt: camp?.next_followup_at ?? null,
+      maxFollowups: typeof camp?.max_followups === 'number' ? camp.max_followups : 3,
+      autoSendFollowups: typeof camp?.auto_send_followups === 'boolean' ? camp.auto_send_followups : false,
+      replyClassification: msg?.latestReplyClassification,
     };
   });
 }

@@ -149,8 +149,8 @@ export interface RecruiterContact {
   initialSentAt?: string;
   followupsSentCount?: number;
   followupsFailedCount?: number;
-  lastFollowupAt?: string;
-  nextFollowupAt?: string;
+  lastFollowupAt?: string | null;
+  nextFollowupAt?: string | null;
   maxFollowups?: number;
   autoSendFollowups?: boolean;
   replyClassification?: string;

@@ -75,7 +75,17 @@ export const demoContacts: RecruiterContact[] = [
     status: 'replied',
     draft:
       'Hi Jamie,\n\nI’m interested in the Product Engineer role at Linear. My experience building accessible React interfaces and design systems aligns with the team’s focus on craft. I’d love to share a few projects and learn more.\n\nBest,\nAlex',
+    subject: 'Exploring Senior Frontend / Product Engineer roles at Linear',
     followup: '2026-11-02',
+    campaignId: 'demo-camp-1',
+    followupsSentCount: 1,
+    followupsFailedCount: 0,
+    maxFollowups: 3,
+    autoSendFollowups: false,
+    nextFollowupAt: null,
+    lastFollowupAt: '2026-11-01T15:30:00Z',
+    replyClassification: 'interested',
+    initialSentAt: '2026-10-28T10:00:00Z',
   },
   {
     id: 'contact-2',
@@ -86,7 +96,15 @@ export const demoContacts: RecruiterContact[] = [
     status: 'awaiting_approval',
     draft:
       'Hi Sam,\n\nI’m a frontend engineer working with Next.js and TypeScript. I’d love to explore the Design Engineer opportunity at Vercel and share my portfolio.\n\nBest,\nAlex',
+    subject: 'Exploring Design Engineer opportunity at Vercel',
     followup: '2026-11-03',
+    campaignId: 'demo-camp-2',
+    followupsSentCount: 0,
+    followupsFailedCount: 0,
+    maxFollowups: 3,
+    autoSendFollowups: false,
+    nextFollowupAt: null,
+    lastFollowupAt: null,
   },
   {
     id: 'contact-3',
@@ -97,6 +115,14 @@ export const demoContacts: RecruiterContact[] = [
     status: 'draft',
     draft:
       'Hi Taylor,\n\nI’m interested in building thoughtful product experiences at Notion. Could we connect about the frontend role?\n\nBest,\nAlex',
+    subject: 'Exploring Product Engineer opportunity at Notion',
     followup: '2026-11-05',
+    campaignId: 'demo-camp-3',
+    followupsSentCount: 0,
+    followupsFailedCount: 0,
+    maxFollowups: 3,
+    autoSendFollowups: false,
+    nextFollowupAt: null,
+    lastFollowupAt: null,
   },
 ];
