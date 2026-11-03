@@ -183,6 +183,7 @@ export interface Database {
           url: string;
           location: string;
           job_description: string | null;
+          application_preparation: Json | null;
           status: ApplicationStatus;
           submission_idempotency_key: string | null;
           submission_approved_at: string | null;
@@ -198,6 +199,7 @@ export interface Database {
           url?: string;
           location?: string;
           job_description?: string | null;
+          application_preparation?: Json | null;
           status?: ApplicationStatus;
           submission_idempotency_key?: string | null;
           submission_approved_at?: string | null;
@@ -213,6 +215,7 @@ export interface Database {
           url?: string;
           location?: string;
           job_description?: string | null;
+          application_preparation?: Json | null;
           status?: ApplicationStatus;
           submission_idempotency_key?: string | null;
           submission_approved_at?: string | null;

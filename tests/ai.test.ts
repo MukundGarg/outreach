@@ -7,6 +7,7 @@ import {
   difyApplicationIntelligenceSchema,
   difyOutreachIntelligenceSchema,
   aiTaskRequestSchema,
+  applicationEmailDraftSchema,
 } from '../src/lib/ai-schemas';
 import { mockAIResults } from '../src/lib/ai-mocks';
 import { parseDifyJsonAnswer } from '../src/services/dify';
@@ -177,6 +178,24 @@ test('Task Router: demo mode produces deterministic visibly labeled mock results
 
   const replyMock = mockAIResults.reply_classify;
   assert.equal(replyMock.classification, 'interview_invitation');
+
+  const emailDraftMock = mockAIResults.application_email_draft;
+  assert.ok(emailDraftMock.subject.length > 0);
+  assert.ok(emailDraftMock.body.length > 0);
+});
+
+test('AI Schemas: validates applicationEmailDraftSchema and enforces non-empty subject and body', () => {
+  const validDraft = {
+    subject: 'Application: AI Systems Engineer - Alex Morgan',
+    body: 'Dear Hiring Team,\n\nI am excited to apply for the AI Systems Engineer position.',
+  };
+  const parsed = applicationEmailDraftSchema.safeParse(validDraft);
+  assert.ok(parsed.success);
+  assert.equal(parsed.data.subject, validDraft.subject);
+
+  // Rejects empty subject or body
+  assert.equal(applicationEmailDraftSchema.safeParse({ subject: '', body: 'Hello' }).success, false);
+  assert.equal(applicationEmailDraftSchema.safeParse({ subject: 'Hi', body: '' }).success, false);
 });
 
 test('AI Task Request Schema: enforces strict validation and prevents malicious payload sizes', () => {

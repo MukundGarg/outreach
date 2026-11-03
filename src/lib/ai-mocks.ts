@@ -5,6 +5,7 @@ import type {
   BasicAnswerDraft,
   DifyApplicationIntelligence,
   DifyOutreachIntelligence,
+  ApplicationEmailDraft,
 } from './ai-schemas';
 
 export const mockAIResults = {
@@ -131,4 +132,9 @@ export const mockAIResults = {
     warnings: [],
     requires_user_approval: true,
   } as DifyOutreachIntelligence,
+
+  application_email_draft: {
+    subject: 'Application: Senior Full Stack Engineer — Alex Morgan',
+    body: 'Dear Hiring Team,\n\nI am writing to express my strong interest in the Senior Full Stack Engineer position. With deep experience in TypeScript, React, Next.js, and PostgreSQL, I specialize in architecting high-performance, accessible user interfaces backed by robust data pipelines.\n\nAt Studio North, I spearheaded our component library migration, reducing render latency by 45% while ensuring end-to-end type safety. In my open-source project Orbit, I built real-time team workflow tooling integrating Supabase and Next.js App Router.\n\nI would welcome the opportunity to discuss how my technical expertise and passion for engineering craft can contribute to your team.\n\nThank you for your consideration.\n\nBest regards,\nAlex Morgan\nalex.morgan@example.com',
+  } as ApplicationEmailDraft,
 };

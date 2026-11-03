@@ -93,11 +93,22 @@ export interface ApplicationEvent {
   from?: ApplicationStatus;
   to?: ApplicationStatus;
 }
+export interface ApplicationPreparation {
+  screeningAnswers?: Record<string, string>;
+  unresolvedAnswers?: Record<string, string>;
+  emailSubject?: string;
+  emailBody?: string;
+  jobDescription?: string;
+  updatedAt?: string;
+}
+
 export interface JobApplication extends z.infer<typeof applicationSchema> {
   id: string;
   status: ApplicationStatus;
   createdAt: string;
   events: ApplicationEvent[];
+  jobDescription?: string | null;
+  preparation?: ApplicationPreparation | null;
 }
 export interface RecruiterContact {
   id: string;

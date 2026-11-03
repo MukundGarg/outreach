@@ -105,6 +105,12 @@ export const difyOutreachIntelligenceSchema = z.object({
 });
 export type DifyOutreachIntelligence = z.infer<typeof difyOutreachIntelligenceSchema>;
 
+export const applicationEmailDraftSchema = z.object({
+  subject: z.string().min(1),
+  body: z.string().min(1),
+});
+export type ApplicationEmailDraft = z.infer<typeof applicationEmailDraftSchema>;
+
 // --- Task 10: AI Router Typed Task Definitions ---
 
 export type AITaskName =
@@ -114,7 +120,8 @@ export type AITaskName =
   | 'simple_answer'
   | 'reply_classify'
   | 'complex_application'
-  | 'outreach_plan';
+  | 'outreach_plan'
+  | 'application_email_draft';
 
 export const aiTaskRequestSchema = z.object({
   task: z.enum([
@@ -125,11 +132,16 @@ export const aiTaskRequestSchema = z.object({
     'reply_classify',
     'complex_application',
     'outreach_plan',
+    'application_email_draft',
   ]),
   jobDescription: z.string().max(50000).optional(),
   replyText: z.string().max(20000).optional(),
   resumeText: z.string().max(50000).optional(),
   screeningQuestions: z.array(z.string().max(1000)).max(50).optional(),
+  screeningAnswers: z.record(z.string(), z.string()).optional(),
+  unresolvedAnswers: z.record(z.string(), z.string()).optional(),
+  jobTitle: z.string().max(200).optional(),
+  company: z.string().max(200).optional(),
   payload: z.record(z.string(), z.unknown()).optional(),
   applicationId: z.string().uuid().optional(),
   resumeId: z.string().uuid().optional(),

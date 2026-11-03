@@ -63,6 +63,16 @@ interface AuthenticatedContextValue {
   setPreferences: (preferences: Preferences) => Promise<void>;
   addApplication: (input: unknown) => Promise<string>;
   transition: (id: string, status: ApplicationStatus, options?: { approved?: boolean }) => Promise<void>;
+  savePreparation: (
+    id: string,
+    preparation: {
+      screeningAnswers?: Record<string, string>;
+      unresolvedAnswers?: Record<string, string>;
+      emailSubject?: string;
+      emailBody?: string;
+      jobDescription?: string;
+    },
+  ) => Promise<void>;
   uploadResumeFile: (file: File) => Promise<void>;
   deleteUserResume: (id: string) => Promise<void>;
   addContact: (input: { name: string; email: string; company?: string; role?: string }) => Promise<RecruiterContact>;
@@ -221,6 +231,33 @@ export function AuthenticatedWorkspaceProvider({ children }: { children: React.R
     }));
   };
 
+  const handleSavePreparation = async (
+    id: string,
+    preparation: {
+      screeningAnswers?: Record<string, string>;
+      unresolvedAnswers?: Record<string, string>;
+      emailSubject?: string;
+      emailBody?: string;
+      jobDescription?: string;
+    },
+  ) => {
+    const res = await fetch(`/api/applications/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'preparation', preparation }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to save application preparation');
+    }
+    const json = await res.json();
+    const updated: JobApplication = json.data;
+    setData((d) => ({
+      ...d,
+      applications: d.applications.map((a) => (a.id === id ? updated : a)),
+    }));
+  };
+
   const handleUploadResume = async (file: File) => {
     const fd = new FormData();
     fd.append('file', file);
@@ -296,6 +333,7 @@ export function AuthenticatedWorkspaceProvider({ children }: { children: React.R
         setPreferences: handleSetPreferences,
         addApplication: handleAddApplication,
         transition: handleTransition,
+        savePreparation: handleSavePreparation,
         uploadResumeFile: handleUploadResume,
         deleteUserResume: handleDeleteResume,
         addContact: handleAddContact,

@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowUpRight, Bot, CheckCircle2, Plus, Search, ShieldAlert, Sparkles } from 'lucide-react';
+import { ArrowLeft, ArrowUpRight, Bot, Check, CheckCircle2, Copy, Mail, Plus, RotateCw, Search, ShieldAlert, Sparkles } from 'lucide-react';
 import {
   applicationStatuses,
   applicationSchema,
@@ -165,14 +165,16 @@ export function Applications({ initialAdd = false }: { initialAdd?: boolean }) {
 }
 
 export function ApplicationDetail({ id }: { id: string }) {
-  const { isDemo, data, transition } = useWorkspace();
+  const { isDemo, data, transition, savePreparation } = useWorkspace();
   const [transitionError, setTransitionError] = useState('');
   const [pendingTarget, setPendingTarget] = useState<ApplicationStatus | ''>('');
   const [approvalConfirmed, setApprovalConfirmed] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
 
+  const a = data.applications.find((v) => v.id === id);
+
   // AI Application Intelligence state
-  const [customJobDesc, setCustomJobDesc] = useState('');
+  const [customJobDesc, setCustomJobDesc] = useState(a?.jobDescription || a?.preparation?.jobDescription || '');
   const [screeningQuestionsInput, setScreeningQuestionsInput] = useState('');
   const [analyzingJob, setAnalyzingJob] = useState(false);
   const [jobAnalysisError, setJobAnalysisError] = useState('');
@@ -181,12 +183,21 @@ export function ApplicationDetail({ id }: { id: string }) {
   const [preparingApp, setPreparingApp] = useState(false);
   const [appPrepError, setAppPrepError] = useState('');
   const [difyAppResult, setDifyAppResult] = useState<DifyApplicationIntelligence | null>(null);
-  const [editedAnswers, setEditedAnswers] = useState<Record<string, string>>({});
+  const [editedAnswers, setEditedAnswers] = useState<Record<string, string>>(
+    () => a?.preparation?.screeningAnswers || a?.preparation?.unresolvedAnswers
+      ? { ...(a.preparation.screeningAnswers || {}), ...(a.preparation.unresolvedAnswers || {}) }
+      : {},
+  );
   const [prepApproved, setPrepApproved] = useState(false);
   const [savingPrep, setSavingPrep] = useState(false);
   const [prepSaveMessage, setPrepSaveMessage] = useState('');
 
-  const a = data.applications.find((v) => v.id === id);
+  // Gemini Email Draft state
+  const [emailSubject, setEmailSubject] = useState(a?.preparation?.emailSubject || '');
+  const [emailBody, setEmailBody] = useState(a?.preparation?.emailBody || '');
+  const [generatingEmail, setGeneratingEmail] = useState(false);
+  const [emailError, setEmailError] = useState('');
+  const [copiedEmail, setCopiedEmail] = useState(false);
 
   if (!a)
     return (
@@ -420,13 +431,17 @@ export function ApplicationDetail({ id }: { id: string }) {
                     throw new Error(payload.error || 'Application preparation failed.');
                   }
                   setDifyAppResult(payload.data);
-                  // Initialize editable answers
+                  // Initialize editable answers while preserving any existing answers candidate already entered
                   if (payload.data?.screening_answers) {
-                    const initialAnswers: Record<string, string> = {};
-                    payload.data.screening_answers.forEach((item: { question: string; answer: string }) => {
-                      initialAnswers[item.question] = item.answer;
+                    setEditedAnswers((prev) => {
+                      const next = { ...prev };
+                      payload.data.screening_answers.forEach((item: { question: string; answer: string }) => {
+                        if (next[item.question] === undefined) {
+                          next[item.question] = item.answer;
+                        }
+                      });
+                      return next;
                     });
-                    setEditedAnswers(initialAnswers);
                   }
                 } catch (err: unknown) {
                   setAppPrepError(err instanceof Error ? err.message : 'Dify preparation failed.');
@@ -461,7 +476,141 @@ export function ApplicationDetail({ id }: { id: string }) {
             </p>
           )}
 
-          {/* Gemini Job Analysis Preview */}
+          {/* Display previously saved application preparation if Dify hasn't been run in this view session */}
+          {!difyAppResult && a.preparation && (a.preparation.screeningAnswers || a.preparation.unresolvedAnswers || a.preparation.emailSubject || a.preparation.emailBody) && (
+            <div
+              className="card stack"
+              style={{
+                background: '#fcfdfb',
+                border: '1px solid #789966',
+                padding: '16px',
+                marginTop: '12px',
+              }}
+            >
+              <div className="between">
+                <div className="row" style={{ color: '#27694e' }}>
+                  <CheckCircle2 size={16} />
+                  <strong>Saved Application Preparation</strong>
+                </div>
+                <span className="badge">Persisted Draft</span>
+              </div>
+              <p className="muted" style={{ fontSize: 12 }}>
+                Previously reviewed screening responses and email draft saved in your workspace.
+              </p>
+
+              {a.preparation.screeningAnswers && Object.keys(a.preparation.screeningAnswers).length > 0 && (
+                <div className="stack" style={{ marginTop: 8 }}>
+                  <strong style={{ fontSize: 13 }}>Screening Answers:</strong>
+                  {Object.entries(a.preparation.screeningAnswers).map(([q, ans], idx) => (
+                    <div key={idx} className="field" style={{ background: '#f5f7f2', padding: 10, borderRadius: 6 }}>
+                      <span style={{ fontWeight: 600, fontSize: 12 }}>Q: {q}</span>
+                      <textarea
+                        rows={2}
+                        style={{ marginTop: 4, fontSize: 12 }}
+                        value={editedAnswers[q] ?? ans}
+                        onChange={(e) => setEditedAnswers((prev) => ({ ...prev, [q]: e.target.value }))}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {a.preparation.unresolvedAnswers && Object.keys(a.preparation.unresolvedAnswers).length > 0 && (
+                <div className="stack" style={{ marginTop: 8 }}>
+                  <strong style={{ fontSize: 13, color: '#8c483a' }}>Unresolved Questions & Answers:</strong>
+                  {Object.entries(a.preparation.unresolvedAnswers).map(([q, ans], idx) => (
+                    <div key={idx} className="field" style={{ background: '#fdf5f4', padding: 10, borderRadius: 6, border: '1px solid #e8c4bf' }}>
+                      <span style={{ fontWeight: 600, fontSize: 12 }}>Q: {q}</span>
+                      <textarea
+                        rows={2}
+                        style={{ marginTop: 4, fontSize: 12 }}
+                        value={editedAnswers[q] ?? ans}
+                        onChange={(e) => setEditedAnswers((prev) => ({ ...prev, [q]: e.target.value }))}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {(emailSubject || emailBody) && (
+                <div className="stack" style={{ marginTop: 12, borderTop: '1px solid #eee', paddingTop: 12 }}>
+                  <div className="between">
+                    <strong style={{ fontSize: 13, color: '#27694e' }}>Saved Application Email Draft:</strong>
+                    <button
+                      type="button"
+                      className="button"
+                      style={{ fontSize: 11, padding: '2px 8px' }}
+                      onClick={() => {
+                        const fullEmail = `Subject: ${emailSubject}\n\n${emailBody}`;
+                        if (navigator.clipboard) {
+                          navigator.clipboard.writeText(fullEmail);
+                          setCopiedEmail(true);
+                          setTimeout(() => setCopiedEmail(false), 2000);
+                        }
+                      }}
+                    >
+                      {copiedEmail ? <Check size={12} /> : <Copy size={12} />} {copiedEmail ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                  <label className="field" style={{ marginTop: 4 }}>
+                    Subject Line (Editable)
+                    <input
+                      type="text"
+                      value={emailSubject}
+                      onChange={(e) => setEmailSubject(e.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    Email Body (Editable)
+                    <textarea
+                      rows={6}
+                      value={emailBody}
+                      onChange={(e) => setEmailBody(e.target.value)}
+                    />
+                  </label>
+                </div>
+              )}
+
+              <div className="row" style={{ marginTop: 10 }}>
+                <button
+                  type="button"
+                  className="button primary"
+                  disabled={savingPrep}
+                  onClick={async () => {
+                    setSavingPrep(true);
+                    setPrepSaveMessage('');
+                    try {
+                      const prepData = {
+                        screeningAnswers: a.preparation?.screeningAnswers
+                          ? Object.fromEntries(Object.keys(a.preparation.screeningAnswers).map((k) => [k, editedAnswers[k] ?? a.preparation?.screeningAnswers?.[k] ?? '']))
+                          : {},
+                        unresolvedAnswers: a.preparation?.unresolvedAnswers
+                          ? Object.fromEntries(Object.keys(a.preparation.unresolvedAnswers).map((k) => [k, editedAnswers[k] ?? a.preparation?.unresolvedAnswers?.[k] ?? '']))
+                          : {},
+                        emailSubject,
+                        emailBody,
+                        jobDescription: customJobDesc.trim() || undefined,
+                      };
+
+                      if (savePreparation) {
+                        await savePreparation(a.id, prepData);
+                      }
+                      setPrepSaveMessage('Reviewed application preparation saved to workspace.');
+                    } catch (err: unknown) {
+                      setPrepSaveMessage(err instanceof Error ? err.message : 'Save failed.');
+                    } finally {
+                      setSavingPrep(false);
+                    }
+                  }}
+                >
+                  {savingPrep ? 'Saving…' : 'Save Changes to Draft'}
+                </button>
+                {prepSaveMessage && (
+                  <span className="success" style={{ fontSize: 12 }}>{prepSaveMessage}</span>
+                )}
+              </div>
+            </div>
+          )}
           {jobAnalysis && (
             <div
               className="card stack"
@@ -592,15 +741,170 @@ export function ApplicationDetail({ id }: { id: string }) {
               )}
 
               {difyAppResult.unresolved_questions?.length > 0 && (
-                <div style={{ marginTop: 8, color: '#a85649' }}>
-                  <strong style={{ fontSize: 12 }}>Unresolved Questions:</strong>
-                  <ul style={{ fontSize: 12, paddingLeft: 18, margin: '4px 0' }}>
-                    {difyAppResult.unresolved_questions.map((uq, i) => (
-                      <li key={i}>{uq}</li>
-                    ))}
-                  </ul>
+                <div style={{ marginTop: 12 }} className="stack">
+                  <div className="row" style={{ color: '#8c483a' }}>
+                    <strong style={{ fontSize: 13 }}>Unresolved Questions — Your Answers:</strong>
+                  </div>
+                  <p className="muted" style={{ fontSize: 11 }}>
+                    Please answer any questions relevant to your background. Unanswered optional questions can remain blank.
+                  </p>
+                  {difyAppResult.unresolved_questions.map((uq, i) => (
+                    <div key={i} className="field" style={{ background: '#fdf5f4', padding: 10, borderRadius: 6, border: '1px solid #e8c4bf' }}>
+                      <span style={{ fontWeight: 600, fontSize: 12, color: '#333' }}>Q: {uq}</span>
+                      <textarea
+                        rows={2}
+                        style={{ marginTop: 4, fontSize: 12 }}
+                        placeholder="Enter your answer here (optional)…"
+                        value={editedAnswers[uq] ?? ''}
+                        onChange={(e) =>
+                          setEditedAnswers((prev) => ({ ...prev, [uq]: e.target.value }))
+                        }
+                      />
+                    </div>
+                  ))}
                 </div>
               )}
+
+              {/* Gemini Application Email Draft Section */}
+              <div
+                className="card stack"
+                style={{
+                  background: '#f8faf6',
+                  padding: 14,
+                  marginTop: 14,
+                  border: '1px solid #789966',
+                }}
+              >
+                <div className="between">
+                  <div className="row" style={{ color: '#27694e' }}>
+                    <Mail size={16} />
+                    <strong style={{ fontSize: 13 }}>Personalized Application Email (Gemini)</strong>
+                  </div>
+                  <button
+                    type="button"
+                    className="button"
+                    style={{ borderColor: '#789966', color: '#27694e', fontSize: 12 }}
+                    disabled={generatingEmail}
+                    onClick={async () => {
+                      setGeneratingEmail(true);
+                      setEmailError('');
+                      try {
+                        const textToAnalyze = customJobDesc.trim() || `${a.title} at ${a.company}. ${a.location || ''}`;
+                        const screeningAnswersPayload: Record<string, string> = {};
+                        const unresolvedAnswersPayload: Record<string, string> = {};
+
+                        // Distinguish screening answers from unresolved answers
+                        const unresolvedSet = new Set(difyAppResult.unresolved_questions || []);
+                        Object.entries(editedAnswers).forEach(([q, val]) => {
+                          if (unresolvedSet.has(q)) {
+                            unresolvedAnswersPayload[q] = val;
+                          } else {
+                            screeningAnswersPayload[q] = val;
+                          }
+                        });
+
+                        const res = await fetch('/api/ai', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            task: 'application_email_draft',
+                            jobTitle: a.title,
+                            company: a.company,
+                            jobDescription: textToAnalyze,
+                            screeningAnswers: screeningAnswersPayload,
+                            unresolvedAnswers: unresolvedAnswersPayload,
+                            applicationId: a.id,
+                          }),
+                        });
+                        const payload = await res.json();
+                        if (!res.ok || !payload.ok) {
+                          throw new Error(payload.error || 'Failed to generate application email.');
+                        }
+                        setEmailSubject(payload.data.subject || '');
+                        setEmailBody(payload.data.body || '');
+                      } catch (err: unknown) {
+                        setEmailError(err instanceof Error ? err.message : 'Failed to generate email.');
+                      } finally {
+                        setGeneratingEmail(false);
+                      }
+                    }}
+                  >
+                    {generatingEmail ? (
+                      <>
+                        <RotateCw size={13} className="spin" /> Generating Email…
+                      </>
+                    ) : emailSubject || emailBody ? (
+                      <>
+                        <RotateCw size={13} /> Regenerate Email
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={13} /> Generate Application Email
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <p className="muted" style={{ fontSize: 11, margin: '2px 0 6px' }}>
+                  Generates a personalized introductory email referencing your real verified experience, education, projects, and answers. Never sends automatically.
+                </p>
+
+                {emailError && (
+                  <p className="notice" role="alert" style={{ color: '#a85649' }}>
+                    {emailError}
+                  </p>
+                )}
+
+                {(emailSubject || emailBody) && (
+                  <div className="stack" style={{ marginTop: 8 }}>
+                    <label className="field">
+                      Subject Line (Editable)
+                      <input
+                        type="text"
+                        value={emailSubject}
+                        onChange={(e) => setEmailSubject(e.target.value)}
+                        placeholder="Application email subject…"
+                      />
+                    </label>
+
+                    <label className="field">
+                      Email Body (Editable)
+                      <textarea
+                        rows={8}
+                        value={emailBody}
+                        onChange={(e) => setEmailBody(e.target.value)}
+                        placeholder="Application email body…"
+                      />
+                    </label>
+
+                    <div className="row" style={{ gap: 8 }}>
+                      <button
+                        type="button"
+                        className="button"
+                        style={{ fontSize: 12 }}
+                        onClick={() => {
+                          const fullEmail = `Subject: ${emailSubject}\n\n${emailBody}`;
+                          if (navigator.clipboard) {
+                            navigator.clipboard.writeText(fullEmail);
+                            setCopiedEmail(true);
+                            setTimeout(() => setCopiedEmail(false), 2000);
+                          }
+                        }}
+                      >
+                        {copiedEmail ? (
+                          <>
+                            <Check size={13} /> Copied!
+                          </>
+                        ) : (
+                          <>
+                            <Copy size={13} /> Copy Email
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
 
               <div
                 className="card"
@@ -616,7 +920,7 @@ export function ApplicationDetail({ id }: { id: string }) {
                   <strong style={{ fontSize: 13 }}>Human Review & Approval</strong>
                 </div>
                 <p style={{ fontSize: 11, margin: '4px 0 8px' }}>
-                  Saving reviewed answers saves your candidate preparation to the database. It does NOT submit this application to any external company or third-party service.
+                  Saving reviewed answers saves your candidate preparation to the database. It does NOT submit this application to any external company or third-party service, nor send any email.
                 </p>
                 <label className="check" style={{ fontSize: 12 }}>
                   <input
@@ -635,8 +939,29 @@ export function ApplicationDetail({ id }: { id: string }) {
                       setSavingPrep(true);
                       setPrepSaveMessage('');
                       try {
-                        // Persist approval event
-                        await transition(a.id, a.status, { approved: true });
+                        const unresolvedSet = new Set(difyAppResult.unresolved_questions || []);
+                        const screeningAnswersPayload: Record<string, string> = {};
+                        const unresolvedAnswersPayload: Record<string, string> = {};
+
+                        Object.entries(editedAnswers).forEach(([q, val]) => {
+                          if (unresolvedSet.has(q)) {
+                            unresolvedAnswersPayload[q] = val;
+                          } else {
+                            screeningAnswersPayload[q] = val;
+                          }
+                        });
+
+                        const prepData = {
+                          screeningAnswers: screeningAnswersPayload,
+                          unresolvedAnswers: unresolvedAnswersPayload,
+                          emailSubject,
+                          emailBody,
+                          jobDescription: customJobDesc.trim() || undefined,
+                        };
+
+                        if (savePreparation) {
+                          await savePreparation(a.id, prepData);
+                        }
                         setPrepSaveMessage('Reviewed application preparation saved to workspace.');
                       } catch (err: unknown) {
                         setPrepSaveMessage(err instanceof Error ? err.message : 'Save failed.');

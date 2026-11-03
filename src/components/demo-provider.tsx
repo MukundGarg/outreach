@@ -100,6 +100,16 @@ const Context = createContext<{
   setPreferences: (v: Preferences) => void;
   addApplication: (v: unknown) => string;
   transition: (id: string, status: ApplicationStatus) => void;
+  savePreparation?: (
+    id: string,
+    preparation: {
+      screeningAnswers?: Record<string, string>;
+      unresolvedAnswers?: Record<string, string>;
+      emailSubject?: string;
+      emailBody?: string;
+      jobDescription?: string;
+    },
+  ) => void;
   updateDraft?: (contactId: string, subject: string, draft: string) => void;
   reset: () => void;
 } | null>(null);
@@ -158,6 +168,23 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
           update((d) => ({ ...d, preferences: preferencesSchema.parse(preferences) })),
         addApplication,
         transition,
+        savePreparation: (id, prep) => {
+          update((d) => ({
+            ...d,
+            applications: d.applications.map((a) =>
+              a.id === id
+                ? {
+                    ...a,
+                    jobDescription: prep.jobDescription || a.jobDescription,
+                    preparation: {
+                      ...prep,
+                      updatedAt: new Date().toISOString(),
+                    },
+                  }
+                : a,
+            ),
+          }));
+        },
         updateDraft: (contactId: string, subject: string, draft: string) => {
           update((d) => ({
             ...d,

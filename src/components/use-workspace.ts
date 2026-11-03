@@ -39,6 +39,16 @@ export interface UnifiedWorkspaceContext {
     status: ApplicationStatus,
     options?: { approved?: boolean },
   ) => Promise<void> | void;
+  savePreparation?: (
+    id: string,
+    preparation: {
+      screeningAnswers?: Record<string, string>;
+      unresolvedAnswers?: Record<string, string>;
+      emailSubject?: string;
+      emailBody?: string;
+      jobDescription?: string;
+    },
+  ) => Promise<void> | void;
   uploadResumeFile?: (file: File) => Promise<void>;
   deleteUserResume?: (id: string) => Promise<void>;
   addContact?: (input: { name: string; email: string; company?: string; role?: string }) => Promise<RecruiterContact>;
@@ -63,6 +73,7 @@ export function useWorkspace(overrideIsDemo?: boolean): UnifiedWorkspaceContext 
       setPreferences: demo.setPreferences,
       addApplication: demo.addApplication,
       transition: (id, status) => demo.transition(id, status),
+      savePreparation: (id, prep) => demo.savePreparation?.(id, prep),
       updateDraft: demo.updateDraft,
       resetDemo: demo.reset,
     };
@@ -79,6 +90,7 @@ export function useWorkspace(overrideIsDemo?: boolean): UnifiedWorkspaceContext 
       setPreferences: auth.setPreferences,
       addApplication: auth.addApplication,
       transition: auth.transition,
+      savePreparation: auth.savePreparation,
       uploadResumeFile: auth.uploadResumeFile,
       deleteUserResume: auth.deleteUserResume,
       addContact: auth.addContact,

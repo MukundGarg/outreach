@@ -150,9 +150,101 @@ export async function getApplication(id: string) {
     url: appRes.data.url,
     location: appRes.data.location,
     status: appRes.data.status,
+    jobDescription: appRes.data.job_description,
+    preparation: parseStoredPreparation(appRes.data.application_preparation, appRes.data.job_description),
     createdAt: appRes.data.created_at,
     events,
   };
+}
+
+function parseStoredPreparation(
+  prepColumn: unknown,
+  jobDescColumn: string | null,
+): {
+  screeningAnswers?: Record<string, string>;
+  unresolvedAnswers?: Record<string, string>;
+  emailSubject?: string;
+  emailBody?: string;
+  jobDescription?: string;
+  updatedAt?: string;
+} | null {
+  if (prepColumn && typeof prepColumn === 'object') {
+    return prepColumn as {
+      screeningAnswers?: Record<string, string>;
+      unresolvedAnswers?: Record<string, string>;
+      emailSubject?: string;
+      emailBody?: string;
+      jobDescription?: string;
+      updatedAt?: string;
+    };
+  }
+
+  // Graceful fallback: check if stored as JSON inside job_description
+  if (jobDescColumn && jobDescColumn.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(jobDescColumn);
+      if (parsed && typeof parsed === 'object' && ('screening_answers' in parsed || 'email_draft' in parsed || 'screeningAnswers' in parsed)) {
+        return {
+          screeningAnswers: parsed.screeningAnswers || parsed.screening_answers,
+          unresolvedAnswers: parsed.unresolvedAnswers || parsed.unresolved_answers,
+          emailSubject: parsed.emailSubject || parsed.email_draft?.subject,
+          emailBody: parsed.emailBody || parsed.email_draft?.body,
+          jobDescription: parsed.jobDescription || parsed.job_description,
+          updatedAt: parsed.updatedAt || parsed.updated_at,
+        };
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
+/**
+ * Saves application preparation (screening answers, unresolved answers, email draft)
+ * without triggering an application status transition.
+ */
+export async function saveApplicationPreparation(
+  id: string,
+  preparation: {
+    screeningAnswers?: Record<string, string>;
+    unresolvedAnswers?: Record<string, string>;
+    emailSubject?: string;
+    emailBody?: string;
+    jobDescription?: string;
+  },
+) {
+  const { db, user } = await authenticatedDatabase();
+
+  const prepPayload = {
+    ...preparation,
+    updatedAt: new Date().toISOString(),
+  };
+
+  // Try updating application_preparation column first; if not present in schema, fallback to job_description JSON
+  const { error: prepColError } = await db
+    .from('job_applications')
+    .update({
+      application_preparation: prepPayload as unknown as Database['public']['Tables']['job_applications']['Update']['application_preparation'],
+      job_description: preparation.jobDescription || null,
+    })
+    .eq('id', id)
+    .eq('user_id', user.id);
+
+  if (prepColError) {
+    // If column not added to DB yet, store safely inside job_description as JSON
+    const fallbackString = JSON.stringify(prepPayload);
+    const { error: fallbackError } = await db
+      .from('job_applications')
+      .update({
+        job_description: fallbackString,
+      })
+      .eq('id', id)
+      .eq('user_id', user.id);
+
+    if (fallbackError) throw fallbackError;
+  }
+
+  return getApplication(id);
 }
 
 export async function createApplication(input: unknown) {

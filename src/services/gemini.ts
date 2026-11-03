@@ -4,10 +4,12 @@ import {
   jobAnalysisSchema,
   replyClassificationSchema,
   basicAnswerDraftSchema,
+  applicationEmailDraftSchema,
   type ExtractedProfile,
   type JobAnalysis,
   type ReplyClassification,
   type BasicAnswerDraft,
+  type ApplicationEmailDraft,
 } from '@/lib/ai-schemas';
 import type { CandidateProfile } from '@/lib/domain';
 
@@ -235,3 +237,91 @@ Return JSON strictly matching:
   const parsed = JSON.parse(cleanJsonText(text));
   return basicAnswerDraftSchema.parse(parsed);
 }
+
+/**
+ * 5. Draft personalized, professional application email using Gemini
+ *
+ * Strict grounding rules:
+ * - Never invent qualifications, experience, degrees, or achievements.
+ * - Never claim unconfirmed work authorization, relocation, or availability.
+ * - Never turn unanswered questions into factual statements.
+ * - Only use information supported by the candidate profile or explicitly supplied answers.
+ */
+export async function draftApplicationEmail(input: {
+  candidateProfile: CandidateProfile;
+  jobTitle: string;
+  company: string;
+  jobDescription?: string;
+  screeningAnswers?: Record<string, string>;
+  unresolvedAnswers?: Record<string, string>;
+}): Promise<ApplicationEmailDraft> {
+  const {
+    candidateProfile,
+    jobTitle,
+    company,
+    jobDescription,
+    screeningAnswers = {},
+    unresolvedAnswers = {},
+  } = input;
+
+  const prompt = `You are an expert career application assistant.
+Draft a professional, personalized application email for a candidate applying to a job.
+
+Role: ${jobTitle}
+Company: ${company}
+Job Requirements / Description:
+"""
+${jobDescription || `${jobTitle} at ${company}`}
+"""
+
+Authoritative Candidate Profile:
+Name: ${candidateProfile.name || 'Candidate'}
+Email: ${candidateProfile.email || ''}
+Headline: ${candidateProfile.headline || ''}
+Location: ${candidateProfile.location || ''}
+Skills: ${candidateProfile.skills || ''}
+Education: ${candidateProfile.education || ''}
+Experience: ${candidateProfile.experience || ''}
+Projects: ${candidateProfile.projects || ''}
+Portfolio: ${candidateProfile.portfolio || ''}
+GitHub: ${candidateProfile.github || ''}
+LinkedIn: ${candidateProfile.linkedin || ''}
+
+Candidate Screening Answers:
+${Object.entries(screeningAnswers)
+  .map(([q, a]) => `- Q: ${q}\n  A: ${a}`)
+  .join('\n') || 'None provided'}
+
+Candidate Answers to Unresolved Questions:
+${Object.entries(unresolvedAnswers)
+  .filter(([, a]) => a && a.trim().length > 0)
+  .map(([q, a]) => `- Q: ${q}\n  A: ${a}`)
+  .join('\n') || 'None provided'}
+
+CRITICAL FACTUAL GROUNDING RULES:
+1. Never invent or exaggerate qualifications, skills, previous employers, degrees, or metrics.
+2. Never claim unconfirmed work authorization, visa status, relocation flexibility, or start availability unless explicitly stated in the profile or answers above.
+3. If an unresolved question was not answered by the candidate, DO NOT invent an answer or state it as fact.
+4. Highlight real relevant skills, projects, and experiences that match the job description.
+5. Keep the tone professional, concise, polished, and confident.
+6. Return JSON strictly matching this schema:
+{
+  "subject": "Clear, professional email subject line including role and candidate name",
+  "body": "Full body of the email with appropriate greeting, concise value proposition paragraphs, and professional sign-off"
+}`;
+
+  const ai = getGenAIClient();
+  const response = await ai.models.generateContent({
+    model: DEFAULT_GEMINI_MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+      temperature: 0.2,
+    },
+  });
+
+  const text = response.text || '';
+  const parsed = JSON.parse(cleanJsonText(text));
+  return applicationEmailDraftSchema.parse(parsed);
+}
+

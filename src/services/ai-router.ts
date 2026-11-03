@@ -7,6 +7,7 @@ import {
   analyzeJobDescription,
   classifyRecruiterReply,
   draftBasicAnswer,
+  draftApplicationEmail,
 } from './gemini';
 import {
   runDifyApplicationIntelligence,
@@ -109,6 +110,26 @@ export async function routeAITask<T>(
       case 'candidate_match': {
         const jd = String(payload.jobDescription || '');
         resultData = await analyzeJobDescription(jd, authoritativeProfile);
+        provider = 'gemini';
+        modelOrAgent = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+        break;
+      }
+
+      case 'application_email_draft': {
+        const jd = String(payload.jobDescription || '');
+        const jobTitle = String(payload.jobTitle || 'Role');
+        const company = String(payload.company || 'Company');
+        const screeningAnswers = (payload.screeningAnswers as Record<string, string>) || {};
+        const unresolvedAnswers = (payload.unresolvedAnswers as Record<string, string>) || {};
+
+        resultData = await draftApplicationEmail({
+          candidateProfile: authoritativeProfile,
+          jobTitle,
+          company,
+          jobDescription: jd,
+          screeningAnswers,
+          unresolvedAnswers,
+        });
         provider = 'gemini';
         modelOrAgent = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
         break;
