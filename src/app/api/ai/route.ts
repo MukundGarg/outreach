@@ -5,6 +5,8 @@ import { extractResumeFromStorage } from '@/services/resume-extraction';
 import { authenticatedDatabase } from '@/services/applications';
 import { aiTaskRequestSchema, type AITaskName } from '@/lib/ai-schemas';
 
+export const runtime = 'nodejs';
+
 const routerRequestSchema = aiTaskRequestSchema;
 
 export async function POST(request: Request) {

@@ -1,32 +1,10 @@
 import 'server-only';
-import { PDFParse } from 'pdf-parse';
 import { authenticatedDatabase } from './applications';
 import { extractCandidateProfile } from './gemini';
+import { parsePdfBufferToText } from '@/lib/pdf-parser';
 import type { ExtractedProfile } from '@/lib/ai-schemas';
 
-const MAX_PDF_TEXT_LENGTH = 30000; // Cap extracted text to ~30k characters
-
-/**
- * Extracts raw text from a PDF Buffer using pdf-parse.
- */
-export async function parsePdfBufferToText(buffer: Buffer): Promise<string> {
-  const parser = new PDFParse({ data: buffer });
-  try {
-    const textResult = await parser.getText();
-    const text = textResult && typeof textResult.text === 'string' ? textResult.text.trim() : '';
-
-    if (!text || text.length < 20) {
-      throw new Error('PDF contains no readable text or is image-only / encrypted');
-    }
-
-    return text.slice(0, MAX_PDF_TEXT_LENGTH);
-  } catch (err: unknown) {
-    if (err instanceof Error && err.message.includes('readable text')) {
-      throw err;
-    }
-    throw new Error('Failed to parse PDF document. It may be corrupt or encrypted.');
-  }
-}
+export { parsePdfBufferToText };
 
 /**
  * Downloads the authenticated user's private resume from Supabase Storage and performs Gemini extraction.
