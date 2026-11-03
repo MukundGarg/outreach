@@ -26,6 +26,30 @@ export function ProfileForm() {
     formState: { errors },
   } = useForm<CandidateProfile>({ resolver: zodResolver(profileSchema), values: data.profile });
 
+  // Fill only fields that the resume extractor actually found.
+  // Keep existing profile values when a resume section is missing.
+  const applyExtractedDataToForm = (extracted: ExtractedProfile) => {
+    const mappings: Array<[keyof CandidateProfile, string]> = [
+      ['name', extracted.name],
+      ['email', extracted.email],
+      ['headline', extracted.headline],
+      ['location', extracted.location],
+      ['skills', extracted.skills],
+      ['education', extracted.education],
+      ['experience', extracted.experience],
+      ['projects', extracted.projects],
+      ['portfolio', extracted.portfolio],
+      ['github', extracted.github],
+      ['linkedin', extracted.linkedin],
+    ];
+
+    for (const [field, value] of mappings) {
+      if (value.trim()) {
+        setValue(field, value.trim(), { shouldDirty: true, shouldValidate: true });
+      }
+    }
+  };
+
   const fields = [
     ['name', 'Full name'],
     ['email', 'Email address'],
@@ -170,6 +194,7 @@ export function ProfileForm() {
                       if (!res.ok || !payload.ok) {
                         throw new Error(payload.error || 'Failed to analyze resume.');
                       }
+                      applyExtractedDataToForm(payload.data);
                       setExtractedData(payload.data);
                       setShowExtractedModal(true);
                     } catch (err: unknown) {
@@ -227,6 +252,7 @@ export function ProfileForm() {
                     if (!res.ok || !payload.ok) {
                       throw new Error(payload.error || 'Failed to analyze demo resume.');
                     }
+                    applyExtractedDataToForm(payload.data);
                     setExtractedData(payload.data);
                     setShowExtractedModal(true);
                   } catch (err: unknown) {
@@ -267,7 +293,7 @@ export function ProfileForm() {
                 <span className="badge">Review before applying</span>
               </div>
               <p style={{ fontSize: 12, margin: '4px 0 12px' }} className="muted">
-                Review the structured fields extracted from your resume. Click &ldquo;Apply to Profile&rdquo; to populate your editable profile form, then save when satisfied.
+                The extracted details have already been added to your editable profile fields. Review and edit them as needed, then close this preview and click &ldquo;Save Profile&rdquo;.
               </p>
               <div className="stack" style={{ fontSize: 13, gap: 8 }}>
                 <div><strong>Headline:</strong> {extractedData.headline || '—'}</div>
@@ -281,25 +307,9 @@ export function ProfileForm() {
                 <button
                   type="button"
                   className="button primary"
-                  onClick={() => {
-                    if (extractedData.headline) setValue('headline', extractedData.headline);
-                    if (extractedData.location) setValue('location', extractedData.location);
-                    if (extractedData.skills) setValue('skills', extractedData.skills);
-                    if (extractedData.education) setValue('education', extractedData.education);
-                    if (extractedData.experience) setValue('experience', extractedData.experience);
-                    if (extractedData.projects) setValue('projects', extractedData.projects);
-                    setShowExtractedModal(false);
-                    setStatusMessage('Extracted information loaded into form. Review and click Save Profile.');
-                  }}
-                >
-                  Apply to Profile Form
-                </button>
-                <button
-                  type="button"
-                  className="button"
                   onClick={() => setShowExtractedModal(false)}
                 >
-                  Discard
+                  Close preview
                 </button>
               </div>
             </div>
