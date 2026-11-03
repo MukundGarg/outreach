@@ -112,16 +112,25 @@ export async function listApplications() {
     return acc;
   }, {} as Record<string, Array<{ id: string; at: string; description: string; from?: ApplicationStatus; to?: ApplicationStatus }>>);
 
-  return (appsRes.data || []).map((app) => ({
-    id: app.id,
-    title: app.title,
-    company: app.company,
-    url: app.url,
-    location: app.location,
-    status: app.status,
-    createdAt: app.created_at,
-    events: eventsByApp[app.id] || [],
-  }));
+  return (appsRes.data || []).map((app) => {
+    const recoveredPrep = parseStoredPreparation(app.application_preparation, app.job_description);
+    let cleanedJobDesc = app.job_description;
+    if (cleanedJobDesc && cleanedJobDesc.trim().startsWith('{') && recoveredPrep?.jobDescription) {
+      cleanedJobDesc = recoveredPrep.jobDescription;
+    }
+    return {
+      id: app.id,
+      title: app.title,
+      company: app.company,
+      url: app.url,
+      location: app.location,
+      status: app.status,
+      jobDescription: cleanedJobDesc,
+      preparation: recoveredPrep,
+      createdAt: app.created_at,
+      events: eventsByApp[app.id] || [],
+    };
+  });
 }
 
 export async function getApplication(id: string) {
@@ -143,6 +152,14 @@ export async function getApplication(id: string) {
     to: ev.to_status,
   }));
 
+  const recoveredPrep = parseStoredPreparation(appRes.data.application_preparation, appRes.data.job_description);
+  let cleanedJobDesc = appRes.data.job_description;
+
+  // If job_description was previously polluted with JSON fallback, recover original text if possible
+  if (cleanedJobDesc && cleanedJobDesc.trim().startsWith('{') && recoveredPrep?.jobDescription) {
+    cleanedJobDesc = recoveredPrep.jobDescription;
+  }
+
   return {
     id: appRes.data.id,
     title: appRes.data.title,
@@ -150,8 +167,8 @@ export async function getApplication(id: string) {
     url: appRes.data.url,
     location: appRes.data.location,
     status: appRes.data.status,
-    jobDescription: appRes.data.job_description,
-    preparation: parseStoredPreparation(appRes.data.application_preparation, appRes.data.job_description),
+    jobDescription: cleanedJobDesc,
+    preparation: recoveredPrep,
     createdAt: appRes.data.created_at,
     events,
   };
@@ -179,7 +196,7 @@ function parseStoredPreparation(
     };
   }
 
-  // Graceful fallback: check if stored as JSON inside job_description
+  // Gracefully recover preparation if previously written into job_description
   if (jobDescColumn && jobDescColumn.trim().startsWith('{')) {
     try {
       const parsed = JSON.parse(jobDescColumn);
@@ -202,6 +219,8 @@ function parseStoredPreparation(
 /**
  * Saves application preparation (screening answers, unresolved answers, email draft)
  * without triggering an application status transition.
+ * Persists preparation exclusively in `application_preparation`.
+ * Preserves existing job descriptions and never overwrites job_description with JSON or null.
  */
 export async function saveApplicationPreparation(
   id: string,
@@ -220,28 +239,31 @@ export async function saveApplicationPreparation(
     updatedAt: new Date().toISOString(),
   };
 
-  // Try updating application_preparation column first; if not present in schema, fallback to job_description JSON
-  const { error: prepColError } = await db
+  const updateData: {
+    application_preparation: Database['public']['Tables']['job_applications']['Update']['application_preparation'];
+    job_description?: string;
+  } = {
+    application_preparation: prepPayload as unknown as Database['public']['Tables']['job_applications']['Update']['application_preparation'],
+  };
+
+  // Only update job_description if an explicit non-null replacement description was provided
+  if (typeof preparation.jobDescription === 'string' && preparation.jobDescription.trim().length > 0) {
+    updateData.job_description = preparation.jobDescription;
+  }
+
+  const { error } = await db
     .from('job_applications')
-    .update({
-      application_preparation: prepPayload as unknown as Database['public']['Tables']['job_applications']['Update']['application_preparation'],
-      job_description: preparation.jobDescription || null,
-    })
+    .update(updateData)
     .eq('id', id)
     .eq('user_id', user.id);
 
-  if (prepColError) {
-    // If column not added to DB yet, store safely inside job_description as JSON
-    const fallbackString = JSON.stringify(prepPayload);
-    const { error: fallbackError } = await db
-      .from('job_applications')
-      .update({
-        job_description: fallbackString,
-      })
-      .eq('id', id)
-      .eq('user_id', user.id);
-
-    if (fallbackError) throw fallbackError;
+  if (error) {
+    if (error.code === '42703' || error.message?.includes('application_preparation')) {
+      throw new Error(
+        'Database migration required: The column "application_preparation" does not exist in job_applications table. Please apply migration 202611030001_application_preparation.sql.',
+      );
+    }
+    throw error;
   }
 
   return getApplication(id);

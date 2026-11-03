@@ -35,6 +35,18 @@ const snapshotSchema = z.object({
       id: z.string(),
       status: z.enum(applicationStatuses),
       createdAt: z.iso.datetime(),
+      jobDescription: z.string().nullable().optional(),
+      preparation: z
+        .object({
+          screeningAnswers: z.record(z.string(), z.string()).optional(),
+          unresolvedAnswers: z.record(z.string(), z.string()).optional(),
+          emailSubject: z.string().optional(),
+          emailBody: z.string().optional(),
+          jobDescription: z.string().optional(),
+          updatedAt: z.string().optional(),
+        })
+        .nullable()
+        .optional(),
       events: z.array(
         z.object({
           id: z.string(),

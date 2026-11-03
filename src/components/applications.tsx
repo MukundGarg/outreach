@@ -165,7 +165,7 @@ export function Applications({ initialAdd = false }: { initialAdd?: boolean }) {
 }
 
 export function ApplicationDetail({ id }: { id: string }) {
-  const { isDemo, data, transition, savePreparation } = useWorkspace();
+  const { isDemo, loading, data, transition, savePreparation } = useWorkspace();
   const [transitionError, setTransitionError] = useState('');
   const [pendingTarget, setPendingTarget] = useState<ApplicationStatus | ''>('');
   const [approvalConfirmed, setApprovalConfirmed] = useState(false);
@@ -198,6 +198,43 @@ export function ApplicationDetail({ id }: { id: string }) {
   const [generatingEmail, setGeneratingEmail] = useState(false);
   const [emailError, setEmailError] = useState('');
   const [copiedEmail, setCopiedEmail] = useState(false);
+
+  // Track the application ID and last loaded preparation timestamp to avoid wiping user edits while synchronizing async loads
+  const [initializedAppId, setInitializedAppId] = useState<string | null>(null);
+  const [lastSyncPrepTimestamp, setLastSyncPrepTimestamp] = useState<string | null>(null);
+
+  if (a && a.id !== initializedAppId) {
+    setInitializedAppId(a.id);
+    setLastSyncPrepTimestamp(a.preparation?.updatedAt || null);
+    setCustomJobDesc(a.jobDescription || a.preparation?.jobDescription || '');
+    setEditedAnswers({
+      ...(a.preparation?.screeningAnswers || {}),
+      ...(a.preparation?.unresolvedAnswers || {}),
+    });
+    setEmailSubject(a.preparation?.emailSubject || '');
+    setEmailBody(a.preparation?.emailBody || '');
+  } else if (a && a.preparation?.updatedAt && a.preparation.updatedAt !== lastSyncPrepTimestamp) {
+    setLastSyncPrepTimestamp(a.preparation.updatedAt);
+    setCustomJobDesc((prev) => prev || a.jobDescription || a.preparation?.jobDescription || '');
+    setEditedAnswers((prev) => ({
+      ...(a.preparation?.screeningAnswers || {}),
+      ...(a.preparation?.unresolvedAnswers || {}),
+      ...prev,
+    }));
+    setEmailSubject((prev) => prev || a.preparation?.emailSubject || '');
+    setEmailBody((prev) => prev || a.preparation?.emailBody || '');
+  }
+
+  // Account for loading state: do NOT show "Opportunity not found" while workspace is loading
+  if (loading && !a) {
+    return (
+      <section className="card stack" style={{ textAlign: 'center', padding: '60px 20px' }}>
+        <Sparkles size={28} style={{ margin: '0 auto 12px', color: '#27694e', animation: 'spin 2s linear infinite' }} />
+        <h2>Loading opportunity…</h2>
+        <p className="muted">Retrieving application details from your workspace.</p>
+      </section>
+    );
+  }
 
   if (!a)
     return (
