@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { getProfile, getApplication, saveApplicationPreparation } from '@/services/applications';
 import { routeAITask } from '@/services/ai-router';
 import { mapProfileField, isSensitiveField } from '@/lib/autofill-mapping';
-import { demoEnabled } from '@/lib/demo';
+import { demoEnabled, demoApplications } from '@/lib/demo';
+import { getDemoAutofill, setDemoAutofill } from '@/lib/demo-autofill-store';
 import {
   extractedFormFieldSchema,
   type ExtractedFormField,
@@ -15,20 +16,20 @@ export const runtime = 'nodejs';
 
 const analyzeUrlSchema = z.object({
   action: z.literal('analyze_url'),
-  applicationId: z.string().uuid(),
+  applicationId: z.string().min(1),
   url: z.string().url().max(2048),
 });
 
 const processFieldsSchema = z.object({
   action: z.literal('process_fields'),
-  applicationId: z.string().uuid(),
+  applicationId: z.string().min(1),
   url: z.string().url().max(2048).optional(),
   fields: z.array(extractedFormFieldSchema).min(1).max(100),
 });
 
 const saveAutofillSchema = z.object({
   action: z.literal('save_autofill'),
-  applicationId: z.string().uuid(),
+  applicationId: z.string().min(1),
   url: z.string().url().max(2048).optional(),
   fields: z.array(
     z.object({
@@ -62,10 +63,18 @@ export async function GET(request: Request) {
     }
 
     if (demoEnabled) {
+      const stored = getDemoAutofill(applicationId);
+      if (stored) {
+        return NextResponse.json({
+          ok: true,
+          data: stored,
+        });
+      }
+      const demoApp = demoApplications.find((a) => a.id === applicationId);
       return NextResponse.json({
         ok: true,
         data: {
-          applicationUrl: 'https://boards.greenhouse.io/example/jobs/12345',
+          applicationUrl: demoApp?.url || 'https://boards.greenhouse.io/example/jobs/12345',
           fields: [],
           autofillStatus: 'idle',
         },
@@ -107,6 +116,10 @@ export async function POST(request: Request) {
       const { applicationId, url } = parsed.data;
 
       if (demoEnabled) {
+        setDemoAutofill(applicationId, {
+          applicationUrl: url,
+          autofillStatus: 'idle',
+        });
         return NextResponse.json({
           ok: true,
           data: {
@@ -150,17 +163,24 @@ export async function POST(request: Request) {
       const { applicationId, url, fields } = parsed.data;
 
       if (demoEnabled) {
-        // Return deterministic mock analysis in demo mode
+        // Return deterministic mock analysis in demo mode and persist to demo store
         const aiMock = await routeAITask<BatchAutofillAnalysis>(
           'autofill_classify_and_answer',
           { formFields: fields },
           { isDemo: true },
         );
+        const combinedFields = aiMock.data.fields;
+        setDemoAutofill(applicationId, {
+          applicationUrl: url || '',
+          fields: combinedFields,
+          extractedAt: new Date().toISOString(),
+          autofillStatus: 'analyzed',
+        });
         return NextResponse.json({
           ok: true,
           data: {
             applicationUrl: url || '',
-            fields: aiMock.data.fields,
+            fields: combinedFields,
           },
         });
       }
@@ -291,9 +311,19 @@ export async function POST(request: Request) {
       const { applicationId, url, fields, autofillStatus } = parsed.data;
 
       if (demoEnabled) {
+        setDemoAutofill(applicationId, {
+          ...(url ? { applicationUrl: url } : {}),
+          fields,
+          autofillStatus: autofillStatus || 'analyzed',
+          lastAutofilledAt:
+            autofillStatus === 'completed' || autofillStatus === 'partially_filled'
+              ? new Date().toISOString()
+              : undefined,
+        });
         return NextResponse.json({
           ok: true,
           message: 'Autofill preparation saved in demo mode.',
+          data: getDemoAutofill(applicationId),
         });
       }
 

@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Command,
   Compass,
+  FileCheck2,
   LayoutDashboard,
   Mail,
   Menu,
@@ -27,6 +28,7 @@ const links = [
   ['/profile', 'Candidate profile', UserRound],
   ['/preferences', 'Job preferences', SlidersHorizontal],
   ['/applications', 'Applications', BriefcaseBusiness],
+  ['/autofill', 'AI Form Filling', FileCheck2],
   ['/outreach', 'Outreach', Mail],
   ['/settings', 'Settings', Settings2],
 ] as const;

@@ -162,27 +162,65 @@ function fillApprovedFields(mappings) {
     }
 
     // Fill element
+    let filledSuccessfully = false;
     if (el.tagName.toLowerCase() === 'select') {
       const options = Array.from(el.querySelectorAll('option'));
-      const match = options.find((opt) => opt.text.trim().toLowerCase() === mapping.proposedValue.toLowerCase());
+      const valLower = mapping.proposedValue.trim().toLowerCase();
+      const match = options.find((opt) => opt.text.trim().toLowerCase() === valLower || opt.value.trim().toLowerCase() === valLower);
       if (match) {
         el.value = match.value;
+        filledSuccessfully = true;
+      } else {
+        skippedCount++;
+        details.push({ fieldLabel: mapping.fieldLabel, status: 'option_not_matched' });
+        continue;
       }
     } else if (el.type === 'checkbox') {
-      el.checked = mapping.proposedValue.toLowerCase() === 'true' || mapping.proposedValue.toLowerCase() === 'yes';
+      const valLower = mapping.proposedValue.toLowerCase();
+      el.checked = valLower === 'true' || valLower === 'yes' || valLower === '1';
+      filledSuccessfully = true;
+    } else if (el.type === 'radio') {
+      // For radio buttons, check if this radio element's value or associated label matches
+      const valLower = mapping.proposedValue.toLowerCase();
+      const radioVal = (el.value || '').toLowerCase();
+      const radioLabel = findLabelForElement(el).toLowerCase();
+      if (radioVal === valLower || radioLabel.includes(valLower)) {
+        el.checked = true;
+        filledSuccessfully = true;
+      } else {
+        // Look for siblings in the same radio group
+        if (el.name) {
+          const groupRadios = Array.from(document.querySelectorAll(`input[type="radio"][name="${CSS.escape(el.name)}"]`));
+          const matchedRadio = groupRadios.find((r) => {
+            const rv = (r.value || '').toLowerCase();
+            const rl = findLabelForElement(r).toLowerCase();
+            return rv === valLower || rl.includes(valLower);
+          });
+          if (matchedRadio) {
+            matchedRadio.checked = true;
+            matchedRadio.dispatchEvent(new Event('input', { bubbles: true }));
+            matchedRadio.dispatchEvent(new Event('change', { bubbles: true }));
+            matchedRadio.style.outline = '2px solid #27694e';
+            filledSuccessfully = true;
+          }
+        }
+      }
     } else {
       el.value = mapping.proposedValue;
+      filledSuccessfully = true;
     }
 
-    // Dispatch input and change events so framework listeners (React/Angular/Vue) register values
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('blur', { bubbles: true }));
+    if (filledSuccessfully) {
+      // Dispatch input and change events so framework listeners (React/Angular/Vue) register values
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.dispatchEvent(new Event('blur', { bubbles: true }));
 
-    // Highlight subtly in green to show filled
-    el.style.outline = '2px solid #27694e';
-    filledCount++;
-    details.push({ fieldLabel: mapping.fieldLabel, status: 'filled' });
+      // Highlight subtly in green to show filled
+      el.style.outline = '2px solid #27694e';
+      filledCount++;
+      details.push({ fieldLabel: mapping.fieldLabel, status: 'filled' });
+    }
   }
 
   return {
