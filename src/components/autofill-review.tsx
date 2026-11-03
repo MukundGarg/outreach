@@ -25,11 +25,29 @@ export function AutofillReview({
   initialAutofill,
   onSaveAutofill,
 }: AutofillReviewProps) {
+  // Use keyed state resetting pattern via inner component to avoid calling setState synchronously in useEffect
+  return (
+    <AutofillReviewInner
+      key={applicationId}
+      applicationId={applicationId}
+      applicationUrl={applicationUrl}
+      initialAutofill={initialAutofill}
+      onSaveAutofill={onSaveAutofill}
+    />
+  );
+}
+
+function AutofillReviewInner({
+  applicationId,
+  applicationUrl,
+  initialAutofill,
+  onSaveAutofill,
+}: AutofillReviewProps) {
   const [url, setUrl] = useState(initialAutofill?.applicationUrl || applicationUrl || '');
   const [analyzingUrl, setAnalyzingUrl] = useState(false);
   const [urlMessage, setUrlMessage] = useState('');
 
-  // Field mappings list
+  // Local editable copy of fields
   const [fields, setFields] = useState<AutofillFieldMapping[]>(initialAutofill?.fields || []);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);

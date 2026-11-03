@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Acme Corp — Job Application Test Form</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 40px auto; max-width: 650px; line-height: 1.5; color: #1e293b; }
+    .form-group { margin-bottom: 16px; }
+    label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 14px; }
+    input[type="text"], input[type="email"], input[type="tel"], textarea, select {
+      width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-size: 14px;
+    }
+    .radio-group label { display: inline-flex; align-items: center; gap: 6px; margin-right: 16px; font-weight: normal; }
+    .checkbox-group label { display: inline-flex; align-items: center; gap: 6px; font-weight: normal; }
+    button { background: #0284c7; color: white; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <h1>Acme Corp — Senior Software Engineer Application</h1>
+  <p>Standard test form for verifying the ApplyPilot Chrome extension autofill and field extraction.</p>
+
+  <form id="job-application-form">
+    <div class="form-group">
+      <label for="first_name">First Name *</label>
+      <input type="text" id="first_name" name="first_name" required />
+    </div>
+
+    <div class="form-group">
+      <label for="last_name">Last Name *</label>
+      <input type="text" id="last_name" name="last_name" required />
+    </div>
+
+    <div class="form-group">
+      <label for="email">Email Address *</label>
+      <input type="email" id="email" name="email" required />
+    </div>
+
+    <div class="form-group">
+      <label for="phone">Phone Number</label>
+      <input type="tel" id="phone" name="phone" />
+    </div>
+
+    <div class="form-group">
+      <label for="linkedin_url">LinkedIn Profile</label>
+      <input type="text" id="linkedin_url" name="linkedin_url" />
+    </div>
+
+    <div class="form-group">
+      <label for="portfolio_url">Portfolio / GitHub Website</label>
+      <input type="text" id="portfolio_url" name="portfolio_url" />
+    </div>
+
+    <div class="form-group">
+      <label for="cover_letter">Cover Letter / Note</label>
+      <textarea id="cover_letter" name="cover_letter" rows="4"></textarea>
+    </div>
+
+    <div class="form-group">
+      <label for="work_authorization">Work Authorization Status</label>
+      <select id="work_authorization" name="work_authorization">
+        <option value="">Select an option</option>
+        <option value="authorized_no_sponsorship">Authorized to work with no sponsorship needed</option>
+        <option value="requires_sponsorship">Will require sponsorship in future</option>
+        <option value="other">Other status</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <fieldset style="border: none; padding: 0; margin: 0;">
+        <legend style="font-weight: 600; margin-bottom: 6px; font-size: 14px;">Are you willing to relocate?</legend>
+        <div class="radio-group">
+          <label><input type="radio" name="relocation_willing" value="yes" /> Yes</label>
+          <label><input type="radio" name="relocation_willing" value="no" /> No</label>
+          <label><input type="radio" name="relocation_willing" value="remote_only" /> Remote Only</label>
+        </div>
+      </fieldset>
+    </div>
+
+    <div class="form-group checkbox-group">
+      <label>
+        <input type="checkbox" id="legally_authorized" name="legally_authorized" />
+        I certify all answers submitted are accurate.
+      </label>
+    </div>
+
+    <div class="form-group">
+      <label for="prefilled_field">Candidate Notes (Already Populated)</label>
+      <input type="text" id="prefilled_field" name="prefilled_field" value="Already entered text" />
+    </div>
+
+    <div class="form-group">
+      <label for="resume_file">Resume File (Unsupported file upload)</label>
+      <input type="file" id="resume_file" name="resume_file" />
+    </div>
+
+    <div id="dynamic-container" class="form-group"></div>
+
+    <button type="button" id="add-dynamic-btn" onclick="addDynamicField()">Add Additional Information</button>
+  </form>
+
+  <script>
+    function addDynamicField() {
+      const container = document.getElementById('dynamic-container');
+      container.innerHTML = `
+        <label for="dynamic_info">Additional Details (Dynamic)</label>
+        <input type="text" id="dynamic_info" name="dynamic_info" placeholder="Dynamic field rendered via script" />
+      `;
+    }
+  </script>
+</body>
+</html>
+

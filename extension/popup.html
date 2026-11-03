@@ -65,6 +65,7 @@
       border-radius: 4px;
       background: #f4f7f0;
       color: #27694e;
+      word-break: break-word;
     }
     .error {
       background: #fff5f5;
@@ -87,10 +88,10 @@
   <div class="muted">Extract form fields and autofill reviewed answers.</div>
 
   <div class="card">
-    <label style="font-weight: 600; display: block; margin-bottom: 4px;">ApplyPilot Web Origin</label>
+    <label for="webOriginInput" style="font-weight: 600; display: block; margin-bottom: 4px;">ApplyPilot Web Origin</label>
     <input type="text" id="webOriginInput" value="http://localhost:3000" />
-    <label style="font-weight: 600; display: block; margin-bottom: 4px;">Active Application ID</label>
-    <input type="text" id="appIdInput" placeholder="Paste UUID from ApplyPilot URL" />
+    <label for="appIdInput" style="font-weight: 600; display: block; margin-bottom: 4px;">Active Application ID</label>
+    <input type="text" id="appIdInput" placeholder="Application ID (e.g. sample-1 or UUID)" />
   </div>
 
   <button id="extractBtn">
@@ -101,9 +102,8 @@
     <span>Autofill Reviewed Answers</span>
   </button>
 
-  <div id="statusBox" style="display: none;" class="status"></div>
+  <div id="statusBox" style="display: none;"></div>
 
   <script src="popup.js"></script>
 </body>
 </html>
-

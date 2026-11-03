@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { z } from 'zod';
 import { getDemoAutofill, setDemoAutofill } from '../src/lib/demo-autofill-store';
 
 test('Demo Autofill Store: persists and retrieves autofill data for demo IDs', () => {
@@ -27,6 +28,7 @@ test('Demo Autofill Store: persists and retrieves autofill data for demo IDs', (
   assert.ok(retrieved !== null, 'Data should be retrieved from store');
   assert.equal(retrieved.applicationUrl, 'https://boards.greenhouse.io/acme/jobs/999');
   assert.equal(retrieved.autofillStatus, 'analyzed');
+  assert.ok(retrieved.fields);
   assert.equal(retrieved.fields.length, 1);
   assert.equal(retrieved.fields[0].proposedValue, 'Alex');
 
@@ -36,13 +38,14 @@ test('Demo Autofill Store: persists and retrieves autofill data for demo IDs', (
   });
 
   const updated = getDemoAutofill(appId);
-  assert.equal(updated?.autofillStatus, 'completed');
-  assert.equal(updated?.fields.length, 1);
-  assert.equal(updated?.fields[0].fieldLabel, 'First Name');
+  assert.ok(updated);
+  assert.equal(updated.autofillStatus, 'completed');
+  assert.ok(updated.fields);
+  assert.equal(updated.fields.length, 1);
+  assert.equal(updated.fields[0].fieldLabel, 'First Name');
 });
 
 test('Autofill Route ID validation: accepts both string demo IDs and standard UUIDs', () => {
-  const { z } = require('zod');
   const analyzeUrlSchema = z.object({
     action: z.literal('analyze_url'),
     applicationId: z.string().min(1),

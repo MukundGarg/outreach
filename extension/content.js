@@ -4,20 +4,32 @@
  * Safely fills reviewed inputs without touching passwords or clicking submit buttons.
  */
 
-// Listen for messages from popup or background script
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === 'EXTRACT_FIELDS') {
-    const fields = extractApplicationFormFields();
-    sendResponse({ ok: true, fields, url: window.location.href });
-    return true;
-  }
+// Global guard to prevent duplicate listeners if re-injected
+if (!window.__APPLYPILOT_CONTENT_INITIALIZED__) {
+  window.__APPLYPILOT_CONTENT_INITIALIZED__ = true;
 
-  if (request.action === 'AUTOFILL_FIELDS') {
-    const result = fillApprovedFields(request.mappings || []);
-    sendResponse({ ok: true, result });
-    return true;
-  }
-});
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'EXTRACT_FIELDS') {
+      try {
+        const fields = extractApplicationFormFields();
+        sendResponse({ ok: true, fields, url: window.location.href });
+      } catch (err) {
+        sendResponse({ ok: false, error: err.message || 'Extraction failed' });
+      }
+      return true;
+    }
+
+    if (request.action === 'AUTOFILL_FIELDS') {
+      try {
+        const result = fillApprovedFields(request.mappings || []);
+        sendResponse({ ok: true, result });
+      } catch (err) {
+        sendResponse({ ok: false, error: err.message || 'Autofill execution failed' });
+      }
+      return true;
+    }
+  });
+}
 
 /**
  * Traverses forms on the active page and gathers accessible labels & input metadata.
@@ -25,24 +37,63 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 function extractApplicationFormFields() {
   const fields = [];
   const processedElements = new Set();
+  const processedRadioGroups = new Set();
 
-  // Query common input controls, excluding passwords, hidden, submits
-  const selector = 'input:not([type="hidden"]):not([type="submit"]):not([type="password"]):not([type="button"]):not([type="reset"]), textarea, select';
+  // Query common input controls, excluding passwords, hidden, submits, buttons
+  const selector = 'input:not([type="hidden"]):not([type="submit"]):not([type="password"]):not([type="button"]):not([type="reset"]):not([type="file"]), textarea, select';
   const elements = document.querySelectorAll(selector);
 
   elements.forEach((el, index) => {
     if (processedElements.has(el)) return;
+
+    const tagName = el.tagName.toLowerCase();
+    const rawType = (el.getAttribute('type') || '').toLowerCase();
+    const type = tagName === 'textarea' ? 'textarea' : tagName === 'select' ? 'select' : rawType || 'text';
+
+    // 1. Grouped Radio Buttons
+    if (type === 'radio') {
+      const groupName = el.name;
+      if (groupName) {
+        if (processedRadioGroups.has(groupName)) {
+          processedElements.add(el);
+          return;
+        }
+        processedRadioGroups.add(groupName);
+
+        // Gather all radio buttons in this group
+        const groupElements = Array.from(
+          document.querySelectorAll(`input[type="radio"][name="${CSS.escape(groupName)}"]`)
+        );
+        groupElements.forEach((r) => processedElements.add(r));
+
+        const groupLabel = findGroupLabel(el, groupElements);
+        const options = groupElements
+          .map((r) => {
+            const optLabel = findLabelForElement(r);
+            return optLabel || r.value;
+          })
+          .filter(Boolean);
+
+        const checkedRadio = groupElements.find((r) => r.checked);
+        const currentValue = checkedRadio ? (findLabelForElement(checkedRadio) || checkedRadio.value) : '';
+
+        fields.push({
+          fieldId: groupName,
+          fieldLabel: groupLabel || groupName,
+          fieldType: 'radio',
+          options: options.length > 0 ? options : undefined,
+          required: groupElements.some((r) => r.required || r.getAttribute('aria-required') === 'true'),
+          currentValue: currentValue || undefined,
+        });
+        return;
+      }
+    }
+
     processedElements.add(el);
 
-    const type = el.tagName.toLowerCase() === 'textarea'
-      ? 'textarea'
-      : el.tagName.toLowerCase() === 'select'
-      ? 'select'
-      : (el.getAttribute('type') || 'text').toLowerCase();
-
-    // Find best accessible label
+    // 2. Standard single controls (text, textarea, select, email, tel, checkbox)
     const label = findLabelForElement(el);
-    if (!label) return; // Skip unlabeled or obscure widgets
+    if (!label) return; // Skip completely unlabeled obscure widgets
 
     const fieldId = el.id || el.name || `field_${index}_${type}`;
     const required = el.required || el.getAttribute('aria-required') === 'true' || label.includes('*');
@@ -52,20 +103,47 @@ function extractApplicationFormFields() {
     if (type === 'select') {
       options = Array.from(el.querySelectorAll('option'))
         .map((opt) => opt.text.trim())
-        .filter(Boolean);
+        .filter((txt) => txt && !txt.toLowerCase().includes('select an option') && !txt.toLowerCase().includes('please select'));
     }
+
+    const fieldType = ['text', 'textarea', 'email', 'tel', 'select', 'checkbox'].includes(type) ? type : 'text';
 
     fields.push({
       fieldId,
       fieldLabel: label.replace(/\s*\*$/, '').trim(),
-      fieldType: ['text', 'textarea', 'email', 'tel', 'select', 'radio', 'checkbox'].includes(type) ? type : 'text',
+      fieldType,
       options: options.length > 0 ? options : undefined,
       required,
       placeholder,
+      currentValue: type === 'checkbox' ? (el.checked ? 'true' : '') : (el.value ? el.value.trim() : undefined),
     });
   });
 
   return fields;
+}
+
+/**
+ * Resolves accessible text label for a group of radio buttons.
+ */
+function findGroupLabel(firstEl) {
+  // Check fieldset legend
+  const fieldset = firstEl.closest('fieldset');
+  if (fieldset) {
+    const legend = fieldset.querySelector('legend');
+    if (legend && legend.innerText.trim()) return legend.innerText.trim();
+  }
+
+  // Check closest wrapper heading or label
+  const container = firstEl.closest('.field, .form-group, .application-question, [role="radiogroup"]');
+  if (container) {
+    const ariaLabel = container.getAttribute('aria-label');
+    if (ariaLabel && ariaLabel.trim()) return ariaLabel.trim();
+
+    const heading = container.querySelector('label, h3, h4, .text, .legend');
+    if (heading && heading.innerText.trim()) return heading.innerText.trim();
+  }
+
+  return findLabelForElement(firstEl);
 }
 
 /**
@@ -115,6 +193,8 @@ function findLabelForElement(el) {
 
 /**
  * Safely fills matching form elements with approved values and fires input events.
+ * Only fields with status === 'reviewed' are filled.
+ * Never touches passwords, never submits forms.
  */
 function fillApprovedFields(mappings) {
   let filledCount = 0;
@@ -122,6 +202,13 @@ function fillApprovedFields(mappings) {
   const details = [];
 
   for (const mapping of mappings) {
+    // ENFORCE HUMAN REVIEW: Skip anything not explicitly reviewed
+    if (mapping.status !== 'reviewed') {
+      skippedCount++;
+      details.push({ fieldLabel: mapping.fieldLabel, status: 'requires_manual_input', reason: 'Unreviewed' });
+      continue;
+    }
+
     if (!mapping.proposedValue || mapping.proposedValue.trim() === '') {
       skippedCount++;
       details.push({ fieldLabel: mapping.fieldLabel, status: 'skipped_empty' });
@@ -147,80 +234,108 @@ function fillApprovedFields(mappings) {
       }
     }
 
+    // Handle Radio Groups
+    if (mapping.fieldType === 'radio' || (el && el.type === 'radio')) {
+      const groupName = mapping.fieldId || (el && el.name);
+      const radioElements = groupName
+        ? Array.from(document.querySelectorAll(`input[type="radio"][name="${CSS.escape(groupName)}"]`))
+        : (el ? [el] : []);
+
+      if (radioElements.length === 0) {
+        skippedCount++;
+        details.push({ fieldLabel: mapping.fieldLabel, status: 'not_found' });
+        continue;
+      }
+
+      // Check if user already made a selection
+      const alreadyChecked = radioElements.find((r) => r.checked);
+      if (alreadyChecked) {
+        skippedCount++;
+        details.push({ fieldLabel: mapping.fieldLabel, status: 'preserved_existing' });
+        continue;
+      }
+
+      const valLower = mapping.proposedValue.trim().toLowerCase();
+      const targetRadio = radioElements.find((r) => {
+        const rVal = (r.value || '').trim().toLowerCase();
+        const rLbl = (findLabelForElement(r) || '').trim().toLowerCase();
+        return rVal === valLower || rLbl === valLower || rLbl.includes(valLower);
+      });
+
+      if (targetRadio) {
+        targetRadio.checked = true;
+        dispatchChangeEvents(targetRadio);
+        targetRadio.style.outline = '2px solid #27694e';
+        filledCount++;
+        details.push({ fieldLabel: mapping.fieldLabel, status: 'filled' });
+      } else {
+        skippedCount++;
+        details.push({ fieldLabel: mapping.fieldLabel, status: 'option_not_matched' });
+      }
+      continue;
+    }
+
     if (!el) {
       skippedCount++;
       details.push({ fieldLabel: mapping.fieldLabel, status: 'not_found' });
       continue;
     }
 
-    // Never overwrite an existing user entry without confirmation
-    if (el.value && el.value.trim().length > 0 && el.value !== mapping.proposedValue) {
-      // Keep existing manual answer intact
-      skippedCount++;
-      details.push({ fieldLabel: mapping.fieldLabel, status: 'preserved_existing' });
+    // Preservation Check:
+    // For checkboxes, only skip if already checked
+    if (el.type === 'checkbox') {
+      if (el.checked) {
+        skippedCount++;
+        details.push({ fieldLabel: mapping.fieldLabel, status: 'preserved_existing' });
+        continue;
+      }
+      const valLower = mapping.proposedValue.trim().toLowerCase();
+      el.checked = valLower === 'true' || valLower === 'yes' || valLower === '1';
+      dispatchChangeEvents(el);
+      el.style.outline = '2px solid #27694e';
+      filledCount++;
+      details.push({ fieldLabel: mapping.fieldLabel, status: 'filled' });
       continue;
     }
 
-    // Fill element
-    let filledSuccessfully = false;
+    // For Select dropdowns
     if (el.tagName.toLowerCase() === 'select') {
       const options = Array.from(el.querySelectorAll('option'));
       const valLower = mapping.proposedValue.trim().toLowerCase();
       const match = options.find((opt) => opt.text.trim().toLowerCase() === valLower || opt.value.trim().toLowerCase() === valLower);
       if (match) {
+        if (el.value && el.value !== match.value && el.value !== '') {
+          // If select has non-default value already selected
+          skippedCount++;
+          details.push({ fieldLabel: mapping.fieldLabel, status: 'preserved_existing' });
+          continue;
+        }
         el.value = match.value;
-        filledSuccessfully = true;
+        dispatchChangeEvents(el);
+        el.style.outline = '2px solid #27694e';
+        filledCount++;
+        details.push({ fieldLabel: mapping.fieldLabel, status: 'filled' });
       } else {
         skippedCount++;
         details.push({ fieldLabel: mapping.fieldLabel, status: 'option_not_matched' });
-        continue;
       }
-    } else if (el.type === 'checkbox') {
-      const valLower = mapping.proposedValue.toLowerCase();
-      el.checked = valLower === 'true' || valLower === 'yes' || valLower === '1';
-      filledSuccessfully = true;
-    } else if (el.type === 'radio') {
-      // For radio buttons, check if this radio element's value or associated label matches
-      const valLower = mapping.proposedValue.toLowerCase();
-      const radioVal = (el.value || '').toLowerCase();
-      const radioLabel = findLabelForElement(el).toLowerCase();
-      if (radioVal === valLower || radioLabel.includes(valLower)) {
-        el.checked = true;
-        filledSuccessfully = true;
-      } else {
-        // Look for siblings in the same radio group
-        if (el.name) {
-          const groupRadios = Array.from(document.querySelectorAll(`input[type="radio"][name="${CSS.escape(el.name)}"]`));
-          const matchedRadio = groupRadios.find((r) => {
-            const rv = (r.value || '').toLowerCase();
-            const rl = findLabelForElement(r).toLowerCase();
-            return rv === valLower || rl.includes(valLower);
-          });
-          if (matchedRadio) {
-            matchedRadio.checked = true;
-            matchedRadio.dispatchEvent(new Event('input', { bubbles: true }));
-            matchedRadio.dispatchEvent(new Event('change', { bubbles: true }));
-            matchedRadio.style.outline = '2px solid #27694e';
-            filledSuccessfully = true;
-          }
-        }
-      }
-    } else {
-      el.value = mapping.proposedValue;
-      filledSuccessfully = true;
+      continue;
     }
 
-    if (filledSuccessfully) {
-      // Dispatch input and change events so framework listeners (React/Angular/Vue) register values
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      el.dispatchEvent(new Event('blur', { bubbles: true }));
-
-      // Highlight subtly in green to show filled
-      el.style.outline = '2px solid #27694e';
-      filledCount++;
-      details.push({ fieldLabel: mapping.fieldLabel, status: 'filled' });
+    // For Text / Textarea / Email / Tel
+    if (el.value && el.value.trim().length > 0) {
+      // Preserve existing manual input
+      skippedCount++;
+      details.push({ fieldLabel: mapping.fieldLabel, status: 'preserved_existing' });
+      continue;
     }
+
+    // Populate React/Framework controlled input properly
+    setNativeValue(el, mapping.proposedValue);
+    dispatchChangeEvents(el);
+    el.style.outline = '2px solid #27694e';
+    filledCount++;
+    details.push({ fieldLabel: mapping.fieldLabel, status: 'filled' });
   }
 
   return {
@@ -230,3 +345,28 @@ function fillApprovedFields(mappings) {
   };
 }
 
+/**
+ * Ensures value change triggers React 16+ setter prototypes.
+ */
+function setNativeValue(element, value) {
+  const valueSetter = Object.getOwnPropertyDescriptor(element, 'value')?.set;
+  const prototype = Object.getPrototypeOf(element);
+  const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+
+  if (prototypeValueSetter && valueSetter !== prototypeValueSetter) {
+    prototypeValueSetter.call(element, value);
+  } else if (valueSetter) {
+    valueSetter.call(element, value);
+  } else {
+    element.value = value;
+  }
+}
+
+/**
+ * Dispatches standard input, change, and blur events with bubbling.
+ */
+function dispatchChangeEvents(element) {
+  element.dispatchEvent(new Event('input', { bubbles: true }));
+  element.dispatchEvent(new Event('change', { bubbles: true }));
+  element.dispatchEvent(new Event('blur', { bubbles: true }));
+}

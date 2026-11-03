@@ -14,22 +14,27 @@ import type { AutofillFieldMapping } from '@/lib/domain';
 
 export const runtime = 'nodejs';
 
+// Enforce UUID validation in production / authenticated mode, while supporting demo IDs (e.g. sample-1) in demo mode
+const applicationIdSchema = demoEnabled
+  ? z.string().min(1)
+  : z.string().uuid({ message: 'Application ID must be a valid UUID in production' });
+
 const analyzeUrlSchema = z.object({
   action: z.literal('analyze_url'),
-  applicationId: z.string().min(1),
+  applicationId: applicationIdSchema,
   url: z.string().url().max(2048),
 });
 
 const processFieldsSchema = z.object({
   action: z.literal('process_fields'),
-  applicationId: z.string().min(1),
+  applicationId: applicationIdSchema,
   url: z.string().url().max(2048).optional(),
   fields: z.array(extractedFormFieldSchema).min(1).max(100),
 });
 
 const saveAutofillSchema = z.object({
   action: z.literal('save_autofill'),
-  applicationId: z.string().min(1),
+  applicationId: applicationIdSchema,
   url: z.string().url().max(2048).optional(),
   fields: z.array(
     z.object({
@@ -60,6 +65,11 @@ export async function GET(request: Request) {
     const applicationId = url.searchParams.get('applicationId');
     if (!applicationId) {
       return NextResponse.json({ ok: false, error: 'Missing applicationId' }, { status: 400 });
+    }
+
+    const idCheck = applicationIdSchema.safeParse(applicationId);
+    if (!idCheck.success) {
+      return NextResponse.json({ ok: false, error: idCheck.error.issues[0]?.message || 'Invalid applicationId' }, { status: 400 });
     }
 
     if (demoEnabled) {
