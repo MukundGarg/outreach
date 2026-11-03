@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import { authenticatedDatabase } from './applications';
 import { getValidAccessTokenForUser } from './gmail-oauth';
 import {
@@ -56,7 +55,7 @@ export async function sendUserApprovedEmail(
     approvalConfirmed,
     draftId,
     expectedApprovedHash,
-    operationKey = crypto.randomUUID(),
+    operationKey,
   } = params;
 
   // 1. Mandatory approval verification

@@ -312,6 +312,7 @@ export function Outreach() {
       const verifiedHash = approvalPayload.data?.approvedContentHash || approvedHash;
       const approvedDraftId = approvalPayload.data?.draftId;
       const verifiedCampaignId = approvalPayload.data?.campaignId;
+      const serverIdempotencyKey = approvalPayload.data?.idempotencyKey;
 
       // 2. Dispatch send request with verified approval bound to the specific draft
       const res = await fetch('/api/outreach/send', {
@@ -326,6 +327,7 @@ export function Outreach() {
           body: editedBody,
           approvalConfirmed: true,
           expectedApprovedHash: verifiedHash || undefined,
+          operationKey: serverIdempotencyKey || undefined,
         }),
       });
       const payload = await res.json();

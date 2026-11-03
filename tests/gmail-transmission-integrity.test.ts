@@ -588,3 +588,178 @@ test('Integration 6: Approval replay with mismatched draftId or content is stric
     },
   );
 });
+
+test('Idempotency Key Handling: caller omitting operationKey uses the stable database key and sends successfully', async () => {
+  const userId = 'user-omit-key';
+  const contactId = 'contact-omit-key';
+  const campaignId = 'camp-omit-key';
+  const recipientEmail = 'recruiter@omitkey.com';
+  const subject = 'Introduction';
+  const body = 'Excited to connect';
+  const contentHash = calculateContentHash(recipientEmail, subject, body);
+
+  const { client } = createMockDatabase({
+    recruiter_contacts: [
+      {
+        id: contactId,
+        user_id: userId,
+        email: recipientEmail,
+        is_suppressed: false,
+      },
+    ],
+    outreach_campaigns: [
+      {
+        id: campaignId,
+        user_id: userId,
+        recruiter_contact_id: contactId,
+        status: 'draft',
+      },
+    ],
+    email_messages: [
+      {
+        id: 'msg-omit-key',
+        user_id: userId,
+        campaign_id: campaignId,
+        recipient_email: recipientEmail,
+        status: 'approved',
+        idempotency_key: 'db-stable-idempotency-key-1234',
+        approved_at: new Date().toISOString(),
+        approved_content_hash: contentHash,
+      },
+    ],
+    gmail_oauth_connections: [
+      {
+        user_id: userId,
+        email: 'sender@example.com',
+        encrypted_access_token: encryptToken('test-access-token'),
+        token_expires_at: new Date(Date.now() + 3600000).toISOString(),
+      },
+    ],
+  });
+
+  const originalFetch = global.fetch;
+  global.fetch = (async () => ({
+    ok: true,
+    json: async () => ({ id: 'gmail-sent-omit-key-id', threadId: 'thread-omit-1' }),
+  })) as any;
+
+  try {
+    // Caller omits operationKey completely
+    const result = await sendUserApprovedEmail(
+      {
+        campaignId,
+        contactId,
+        recipientEmail,
+        subject,
+        body,
+        approvalConfirmed: true,
+        draftId: 'msg-omit-key',
+      },
+      { db: client, user: { id: userId } },
+    );
+
+    assert.equal(result.messageId, 'msg-omit-key');
+    assert.equal(result.gmailMessageId, 'gmail-sent-omit-key-id');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('Idempotency Key Handling: matching server-associated key sends successfully; incorrect key is rejected', async () => {
+  const userId = 'user-match-key';
+  const contactId = 'contact-match-key';
+  const campaignId = 'camp-match-key';
+  const recipientEmail = 'recruiter@matchkey.com';
+  const subject = 'Checking In';
+  const body = 'Looking forward to hearing from you.';
+  const contentHash = calculateContentHash(recipientEmail, subject, body);
+
+  const { client } = createMockDatabase({
+    recruiter_contacts: [
+      {
+        id: contactId,
+        user_id: userId,
+        email: recipientEmail,
+        is_suppressed: false,
+      },
+    ],
+    outreach_campaigns: [
+      {
+        id: campaignId,
+        user_id: userId,
+        recruiter_contact_id: contactId,
+        status: 'draft',
+      },
+    ],
+    email_messages: [
+      {
+        id: 'msg-match-key',
+        user_id: userId,
+        campaign_id: campaignId,
+        recipient_email: recipientEmail,
+        status: 'approved',
+        idempotency_key: 'correct-stable-server-key-5678',
+        approved_at: new Date().toISOString(),
+        approved_content_hash: contentHash,
+      },
+    ],
+    gmail_oauth_connections: [
+      {
+        user_id: userId,
+        email: 'sender@example.com',
+        encrypted_access_token: encryptToken('test-access-token'),
+        token_expires_at: new Date(Date.now() + 3600000).toISOString(),
+      },
+    ],
+  });
+
+  // 1. Incorrect key supplied -> strictly rejected
+  await assert.rejects(
+    async () => {
+      await sendUserApprovedEmail(
+        {
+          campaignId,
+          contactId,
+          recipientEmail,
+          subject,
+          body,
+          approvalConfirmed: true,
+          draftId: 'msg-match-key',
+          operationKey: 'wrong-key-from-client-9999',
+        },
+        { db: client, user: { id: userId } },
+      );
+    },
+    {
+      message: /Idempotency key mismatch: Sending must use the stable server-associated idempotency key/,
+    },
+  );
+
+  // 2. Correct stable server-associated key supplied -> succeeds
+  const originalFetch = global.fetch;
+  global.fetch = (async () => ({
+    ok: true,
+    json: async () => ({ id: 'gmail-sent-match-key-id', threadId: 'thread-match-1' }),
+  })) as any;
+
+  try {
+    const result = await sendUserApprovedEmail(
+      {
+        campaignId,
+        contactId,
+        recipientEmail,
+        subject,
+        body,
+        approvalConfirmed: true,
+        draftId: 'msg-match-key',
+        operationKey: 'correct-stable-server-key-5678',
+      },
+      { db: client, user: { id: userId } },
+    );
+
+    assert.equal(result.messageId, 'msg-match-key');
+    assert.equal(result.gmailMessageId, 'gmail-sent-match-key-id');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
