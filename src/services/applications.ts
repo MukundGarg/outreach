@@ -177,36 +177,23 @@ export async function getApplication(id: string) {
 function parseStoredPreparation(
   prepColumn: unknown,
   jobDescColumn: string | null,
-): {
-  screeningAnswers?: Record<string, string>;
-  unresolvedAnswers?: Record<string, string>;
-  emailSubject?: string;
-  emailBody?: string;
-  jobDescription?: string;
-  updatedAt?: string;
-} | null {
+): import('@/lib/domain').ApplicationPreparation | null {
   if (prepColumn && typeof prepColumn === 'object') {
-    return prepColumn as {
-      screeningAnswers?: Record<string, string>;
-      unresolvedAnswers?: Record<string, string>;
-      emailSubject?: string;
-      emailBody?: string;
-      jobDescription?: string;
-      updatedAt?: string;
-    };
+    return prepColumn as import('@/lib/domain').ApplicationPreparation;
   }
 
   // Gracefully recover preparation if previously written into job_description
   if (jobDescColumn && jobDescColumn.trim().startsWith('{')) {
     try {
       const parsed = JSON.parse(jobDescColumn);
-      if (parsed && typeof parsed === 'object' && ('screening_answers' in parsed || 'email_draft' in parsed || 'screeningAnswers' in parsed)) {
+      if (parsed && typeof parsed === 'object' && ('screening_answers' in parsed || 'email_draft' in parsed || 'screeningAnswers' in parsed || 'autofill' in parsed)) {
         return {
           screeningAnswers: parsed.screeningAnswers || parsed.screening_answers,
           unresolvedAnswers: parsed.unresolvedAnswers || parsed.unresolved_answers,
           emailSubject: parsed.emailSubject || parsed.email_draft?.subject,
           emailBody: parsed.emailBody || parsed.email_draft?.body,
           jobDescription: parsed.jobDescription || parsed.job_description,
+          autofill: parsed.autofill,
           updatedAt: parsed.updatedAt || parsed.updated_at,
         };
       }
@@ -217,20 +204,14 @@ function parseStoredPreparation(
 }
 
 /**
- * Saves application preparation (screening answers, unresolved answers, email draft)
+ * Saves application preparation (screening answers, unresolved answers, email draft, autofill)
  * without triggering an application status transition.
  * Persists preparation exclusively in `application_preparation`.
  * Preserves existing job descriptions and never overwrites job_description with JSON or null.
  */
 export async function saveApplicationPreparation(
   id: string,
-  preparation: {
-    screeningAnswers?: Record<string, string>;
-    unresolvedAnswers?: Record<string, string>;
-    emailSubject?: string;
-    emailBody?: string;
-    jobDescription?: string;
-  },
+  preparation: import('@/lib/domain').ApplicationPreparation,
 ) {
   const { db, user } = await authenticatedDatabase();
 

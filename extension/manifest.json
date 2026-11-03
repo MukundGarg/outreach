@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "ApplyPilot AI — Job Application Autofill",
+  "version": "1.0.0",
+  "description": "Extracts external job application forms and securely autofills approved answers with human control.",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*",
+    "https://*.onrender.com/*",
+    "https://*/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "ApplyPilot Autofill"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
+

@@ -43,6 +43,30 @@ const snapshotSchema = z.object({
           emailSubject: z.string().optional(),
           emailBody: z.string().optional(),
           jobDescription: z.string().optional(),
+          autofill: z
+            .object({
+              applicationUrl: z.string().optional(),
+              fields: z
+                .array(
+                  z.object({
+                    fieldId: z.string(),
+                    fieldLabel: z.string(),
+                    fieldType: z.enum(['text', 'textarea', 'email', 'tel', 'select', 'radio', 'checkbox']),
+                    proposedValue: z.string(),
+                    source: z.enum(['profile', 'gemini_basic', 'gemini_complex', 'user']),
+                    category: z.enum(['profile', 'mapped_answer', 'gemini_basic', 'complex_review', 'sensitive', 'missing']),
+                    status: z.enum(['reviewed', 'pending_review', 'user_required']),
+                    confidence: z.number(),
+                    options: z.array(z.string()).optional(),
+                    required: z.boolean().optional(),
+                  }),
+                )
+                .optional(),
+              extractedAt: z.string().optional(),
+              lastAutofilledAt: z.string().optional(),
+              autofillStatus: z.enum(['idle', 'analyzed', 'partially_filled', 'completed']).optional(),
+            })
+            .optional(),
           updatedAt: z.string().optional(),
         })
         .nullable()

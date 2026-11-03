@@ -1,6 +1,7 @@
 import type {
   AITaskName,
   AIRouterResponse,
+  ExtractedFormField,
 } from '@/lib/ai-schemas';
 import {
   extractCandidateProfile,
@@ -9,6 +10,7 @@ import {
   draftBasicAnswer,
   draftApplicationEmail,
   analyzeRecruiterCsvBatch,
+  classifyAndAnswerAutofillFields,
 } from './gemini';
 import {
   runDifyApplicationIntelligence,
@@ -263,6 +265,22 @@ export async function routeAITask<T>(
         const headers = (payload.csvHeaders as string[]) || [];
         const rows = (payload.csvRows as Record<string, string>[]) || [];
         resultData = await analyzeRecruiterCsvBatch(headers, rows);
+        modelOrAgent = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+        provider = 'gemini';
+        break;
+      }
+
+      case 'autofill_classify_and_answer': {
+        const fields = (payload.formFields as ExtractedFormField[]) || [];
+        const candidateProfile = await getProfile();
+        resultData = await classifyAndAnswerAutofillFields({
+          fields,
+          profile: candidateProfile,
+          jobTitle: payload.jobTitle as string | undefined,
+          company: payload.company as string | undefined,
+          jobDescription: payload.jobDescription as string | undefined,
+          existingPrep: payload.screeningAnswers as Record<string, string> | undefined,
+        });
         modelOrAgent = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
         provider = 'gemini';
         break;

@@ -137,6 +137,45 @@ export const csvRecruiterBatchAnalysisSchema = z.object({
 });
 export type CsvRecruiterBatchAnalysis = z.infer<typeof csvRecruiterBatchAnalysisSchema>;
 
+// --- Autofill Field Extraction & Question Classification Schemas ---
+
+export const extractedFormFieldSchema = z.object({
+  fieldId: z.string(),
+  fieldLabel: z.string(),
+  fieldType: z.enum(['text', 'textarea', 'email', 'tel', 'select', 'radio', 'checkbox']),
+  options: z.array(z.string()).optional(),
+  required: z.boolean().default(false),
+  placeholder: z.string().optional(),
+});
+export type ExtractedFormField = z.infer<typeof extractedFormFieldSchema>;
+
+export const questionClassificationSchema = z.object({
+  category: z.enum(['basic', 'complex', 'sensitive', 'profile_direct']),
+  reason: z.string(),
+  requiresHumanInput: z.boolean(),
+  suggestedAnswer: z.string().nullable().default(null),
+  confidence: z.number().min(0).max(1).default(0.9),
+});
+export type QuestionClassification = z.infer<typeof questionClassificationSchema>;
+
+export const batchAutofillAnalysisSchema = z.object({
+  fields: z.array(
+    z.object({
+      fieldId: z.string(),
+      fieldLabel: z.string(),
+      fieldType: z.enum(['text', 'textarea', 'email', 'tel', 'select', 'radio', 'checkbox']),
+      proposedValue: z.string(),
+      source: z.enum(['profile', 'gemini_basic', 'gemini_complex', 'user']),
+      category: z.enum(['profile', 'mapped_answer', 'gemini_basic', 'complex_review', 'sensitive', 'missing']),
+      status: z.enum(['reviewed', 'pending_review', 'user_required']),
+      confidence: z.number().min(0).max(1),
+      options: z.array(z.string()).optional(),
+      required: z.boolean().default(false),
+    }),
+  ),
+});
+export type BatchAutofillAnalysis = z.infer<typeof batchAutofillAnalysisSchema>;
+
 // --- Task 10: AI Router Typed Task Definitions ---
 
 export type AITaskName =
@@ -148,7 +187,8 @@ export type AITaskName =
   | 'complex_application'
   | 'outreach_plan'
   | 'application_email_draft'
-  | 'recruiter_csv_analyze';
+  | 'recruiter_csv_analyze'
+  | 'autofill_classify_and_answer';
 
 export const aiTaskRequestSchema = z.object({
   task: z.enum([
@@ -161,6 +201,7 @@ export const aiTaskRequestSchema = z.object({
     'outreach_plan',
     'application_email_draft',
     'recruiter_csv_analyze',
+    'autofill_classify_and_answer',
   ]),
   jobDescription: z.string().max(50000).optional(),
   replyText: z.string().max(20000).optional(),
@@ -172,6 +213,7 @@ export const aiTaskRequestSchema = z.object({
   company: z.string().max(200).optional(),
   csvRows: z.array(z.record(z.string(), z.string())).max(100).optional(),
   csvHeaders: z.array(z.string()).max(100).optional(),
+  formFields: z.array(extractedFormFieldSchema).max(100).optional(),
   payload: z.record(z.string(), z.unknown()).optional(),
   applicationId: z.string().uuid().optional(),
   resumeId: z.string().uuid().optional(),

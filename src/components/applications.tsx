@@ -9,9 +9,11 @@ import {
   canTransitionApplication,
   label,
   type ApplicationStatus,
+  type ApplicationAutofillData,
 } from '@/lib/domain';
 import type { JobAnalysis, DifyApplicationIntelligence } from '@/lib/ai-schemas';
 import { useWorkspace } from './use-workspace';
+import { AutofillReview } from './autofill-review';
 
 export function Applications({ initialAdd = false }: { initialAdd?: boolean }) {
   const { isDemo, data, addApplication } = useWorkspace();
@@ -283,6 +285,25 @@ export function ApplicationDetail({ id }: { id: string }) {
         </div>
         <span className={`badge ${a.status}`}>{label(a.status)}</span>
       </div>
+
+      {/* AI Application Autofill Panel */}
+      <div style={{ marginBottom: 20 }}>
+        <AutofillReview
+          applicationId={a.id}
+          applicationUrl={a.url || ''}
+          initialAutofill={a.preparation?.autofill}
+          onSaveAutofill={async (autofillData: ApplicationAutofillData) => {
+            if (savePreparation) {
+              await savePreparation(a.id, {
+                ...a.preparation,
+                autofill: autofillData,
+              });
+            }
+          }}
+          isDemo={isDemo}
+        />
+      </div>
+
       <div className="grid2">
         <section className="card stack">
           <h2>Application workspace</h2>

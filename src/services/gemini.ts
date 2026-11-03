@@ -6,12 +6,15 @@ import {
   basicAnswerDraftSchema,
   applicationEmailDraftSchema,
   csvRecruiterBatchAnalysisSchema,
+  batchAutofillAnalysisSchema,
   type ExtractedProfile,
   type JobAnalysis,
   type ReplyClassification,
   type BasicAnswerDraft,
   type ApplicationEmailDraft,
   type CsvRecruiterBatchAnalysis,
+  type BatchAutofillAnalysis,
+  type ExtractedFormField,
 } from '@/lib/ai-schemas';
 import type { CandidateProfile } from '@/lib/domain';
 
@@ -417,5 +420,113 @@ CRITICAL SECURITY & INTEGRITY INSTRUCTIONS:
   const parsed = JSON.parse(cleanJsonText(text));
   return csvRecruiterBatchAnalysisSchema.parse(parsed);
 }
+
+/**
+ * 7. Classify extracted application form questions and generate grounded answers using Gemini
+ * Respects strict rules:
+ * - Basic questions: generated based on profile & job context.
+ * - Complex questions: generates grounded suggestions requiring review.
+ * - Sensitive questions: strictly leaves answer blank and marks as user_required.
+ */
+export async function classifyAndAnswerAutofillFields(params: {
+  fields: ExtractedFormField[];
+  profile: CandidateProfile | null;
+  jobTitle?: string;
+  company?: string;
+  jobDescription?: string;
+  existingPrep?: Record<string, string>;
+}): Promise<BatchAutofillAnalysis> {
+  const { fields, profile, jobTitle, company, jobDescription, existingPrep } = params;
+
+  if (!fields || fields.length === 0) {
+    return { fields: [] };
+  }
+
+  const prompt = `You are an AI Job Application Autofill Assistant.
+You have an applicant's verified candidate profile, target job details, and a list of form fields extracted from an online job application.
+
+Candidate Profile:
+- Full Name: ${profile?.name || 'Not provided'}
+- Email: ${profile?.email || 'Not provided'}
+- Headline: ${profile?.headline || 'Not provided'}
+- Location: ${profile?.location || 'Not provided'}
+- Skills: ${profile?.skills || 'Not provided'}
+- Education: ${profile?.education || 'Not provided'}
+- Work Experience: ${profile?.experience || 'Not provided'}
+- Projects: ${profile?.projects || 'Not provided'}
+- LinkedIn: ${profile?.linkedin || 'Not provided'}
+- GitHub: ${profile?.github || 'Not provided'}
+- Portfolio: ${profile?.portfolio || 'Not provided'}
+
+Target Job:
+- Title: ${jobTitle || 'Not specified'}
+- Company: ${company || 'Not specified'}
+- Description: ${jobDescription ? jobDescription.slice(0, 3000) : 'Not specified'}
+
+Existing Candidate Screening Answers:
+${JSON.stringify(existingPrep || {}, null, 2)}
+
+Form Fields to Analyze and Answer:
+${JSON.stringify(fields, null, 2)}
+
+CATEGORIZATION RULES:
+1. "sensitive": ANY question regarding work authorization, visa sponsorship, disability, veteran status, race, ethnicity, gender, felony, background check, legal attestation, or certification checkboxes.
+   - For "sensitive": proposedValue MUST be "" (empty string).
+   - source MUST be "user".
+   - status MUST be "user_required".
+   - Never generate or guess answers for sensitive questions!
+
+2. "profile": Direct applicant personal details (Name, First Name, Last Name, Email, Phone, Location, City, LinkedIn URL, GitHub, Portfolio).
+   - source MUST be "profile".
+   - Map strictly from the profile. If not in profile, proposedValue is "" and category is "missing".
+   - status is "reviewed" if populated, "user_required" if missing.
+
+3. "gemini_basic": Routine screening questions like "Tell me about yourself", "Why are you interested in this position?", "What relevant skills do you have?", "Summarize your experience".
+   - Generate a concise, professional 2-4 sentence response strictly grounded in the profile and job details.
+   - source: "gemini_basic".
+   - status: "reviewed".
+
+4. "complex_review": Behavioral or in-depth questions like "Describe a difficult technical challenge you solved", "Tell us about a time you demonstrated leadership", "Significant project".
+   - If candidate profile has relevant projects/experience, synthesize a grounded draft.
+   - source: "gemini_complex".
+   - status: "pending_review".
+   - If profile lacks details, proposedValue is "" and status is "user_required".
+
+CRITICAL GROUNDING RULES:
+- Never fabricate past employers, degrees, skills, or metrics.
+- Never claim work authorization or citizenship.
+- Return JSON strictly matching:
+{
+  "fields": [
+    {
+      "fieldId": string,
+      "fieldLabel": string,
+      "fieldType": "text" | "textarea" | "email" | "tel" | "select" | "radio" | "checkbox",
+      "proposedValue": string,
+      "source": "profile" | "gemini_basic" | "gemini_complex" | "user",
+      "category": "profile" | "mapped_answer" | "gemini_basic" | "complex_review" | "sensitive" | "missing",
+      "status": "reviewed" | "pending_review" | "user_required",
+      "confidence": number (0.0 to 1.0),
+      "options": string[] (optional),
+      "required": boolean
+    }
+  ]
+}`;
+
+  const ai = getGenAIClient();
+  const response = await ai.models.generateContent({
+    model: DEFAULT_GEMINI_MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+      temperature: 0.2,
+    },
+  });
+
+  const text = response.text || '';
+  const parsed = JSON.parse(cleanJsonText(text));
+  return batchAutofillAnalysisSchema.parse(parsed);
+}
+
 
 

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ApplyPilot Autofill</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      width: 340px;
+      margin: 0;
+      padding: 16px;
+      background: #fdfdfb;
+      color: #1e293b;
+    }
+    h2 {
+      margin: 0 0 4px;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #27694e;
+    }
+    .muted {
+      color: #64748b;
+      font-size: 12px;
+      margin-bottom: 12px;
+    }
+    .card {
+      background: white;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 12px;
+      font-size: 12px;
+    }
+    button {
+      width: 100%;
+      background: #27694e;
+      color: white;
+      border: none;
+      padding: 9px 12px;
+      border-radius: 5px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    button:disabled {
+      background: #94a3b8;
+      cursor: not-allowed;
+    }
+    button.secondary {
+      background: #f1f5f9;
+      color: #334155;
+      border: 1px solid #cbd5e1;
+      margin-top: 6px;
+    }
+    .status {
+      font-size: 11px;
+      margin-top: 8px;
+      padding: 6px;
+      border-radius: 4px;
+      background: #f4f7f0;
+      color: #27694e;
+    }
+    .error {
+      background: #fff5f5;
+      color: #b91c1c;
+      border: 1px solid #fecaca;
+    }
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 6px 8px;
+      font-size: 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body>
+  <h2>ApplyPilot AI Autofill</h2>
+  <div class="muted">Extract form fields and autofill reviewed answers.</div>
+
+  <div class="card">
+    <label style="font-weight: 600; display: block; margin-bottom: 4px;">ApplyPilot Web Origin</label>
+    <input type="text" id="webOriginInput" value="http://localhost:3000" />
+    <label style="font-weight: 600; display: block; margin-bottom: 4px;">Active Application ID</label>
+    <input type="text" id="appIdInput" placeholder="Paste UUID from ApplyPilot URL" />
+  </div>
+
+  <button id="extractBtn">
+    <span>Extract Fields from This Page</span>
+  </button>
+
+  <button id="autofillBtn" class="secondary" style="display: none;">
+    <span>Autofill Reviewed Answers</span>
+  </button>
+
+  <div id="statusBox" style="display: none;" class="status"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
+

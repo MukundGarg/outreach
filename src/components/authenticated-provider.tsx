@@ -71,6 +71,7 @@ interface AuthenticatedContextValue {
       emailSubject?: string;
       emailBody?: string;
       jobDescription?: string;
+      autofill?: import('@/lib/domain').ApplicationAutofillData;
     },
   ) => Promise<void>;
   uploadResumeFile: (file: File) => Promise<void>;
@@ -239,6 +240,7 @@ export function AuthenticatedWorkspaceProvider({ children }: { children: React.R
       emailSubject?: string;
       emailBody?: string;
       jobDescription?: string;
+      autofill?: import('@/lib/domain').ApplicationAutofillData;
     },
   ) => {
     const res = await fetch(`/api/applications/${id}`, {

@@ -47,6 +47,7 @@ export interface UnifiedWorkspaceContext {
       emailSubject?: string;
       emailBody?: string;
       jobDescription?: string;
+      autofill?: import('@/lib/domain').ApplicationAutofillData;
     },
   ) => Promise<void> | void;
   uploadResumeFile?: (file: File) => Promise<void>;

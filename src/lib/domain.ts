@@ -93,12 +93,34 @@ export interface ApplicationEvent {
   from?: ApplicationStatus;
   to?: ApplicationStatus;
 }
+export interface AutofillFieldMapping {
+  fieldId: string;
+  fieldLabel: string;
+  fieldType: 'text' | 'textarea' | 'email' | 'tel' | 'select' | 'radio' | 'checkbox';
+  proposedValue: string;
+  source: 'profile' | 'gemini_basic' | 'gemini_complex' | 'user';
+  category: 'profile' | 'mapped_answer' | 'gemini_basic' | 'complex_review' | 'sensitive' | 'missing';
+  status: 'reviewed' | 'pending_review' | 'user_required';
+  confidence: number;
+  options?: string[]; // For select, radio
+  required?: boolean;
+}
+
+export interface ApplicationAutofillData {
+  applicationUrl?: string;
+  fields?: AutofillFieldMapping[];
+  extractedAt?: string;
+  lastAutofilledAt?: string;
+  autofillStatus?: 'idle' | 'analyzed' | 'partially_filled' | 'completed';
+}
+
 export interface ApplicationPreparation {
   screeningAnswers?: Record<string, string>;
   unresolvedAnswers?: Record<string, string>;
   emailSubject?: string;
   emailBody?: string;
   jobDescription?: string;
+  autofill?: ApplicationAutofillData;
   updatedAt?: string;
 }
 
