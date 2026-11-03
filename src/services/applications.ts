@@ -368,29 +368,36 @@ export async function listContacts(): Promise<RecruiterContact[]> {
   const contactIds = contacts.map((c) => c.id);
   const { data: campaigns } = await db
     .from('outreach_campaigns')
-    .select('id, recruiter_contact_id, status')
+    .select('*')
     .eq('user_id', user.id)
     .in('recruiter_contact_id', contactIds);
 
-  const campaignMap = new Map<string, { id: string; status: string }>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const campaignMap = new Map<string, any>();
   for (const camp of campaigns || []) {
-    campaignMap.set(camp.recruiter_contact_id, { id: camp.id, status: camp.status });
+    campaignMap.set(camp.recruiter_contact_id, camp);
   }
 
   // Fetch latest email messages for these campaigns
   const campaignIds = (campaigns || []).map((c) => c.id);
-  const messagesMap = new Map<string, { body: string; subject: string; status: string }>();
+  const messagesMap = new Map<string, { body: string; subject: string; status: string; sent_at?: string; reply_classification?: string }>();
   if (campaignIds.length > 0) {
     const { data: messages } = await db
       .from('email_messages')
-      .select('campaign_id, body, subject, status, created_at')
+      .select('campaign_id, body, subject, status, created_at, sent_at, reply_classification')
       .eq('user_id', user.id)
       .in('campaign_id', campaignIds)
       .order('created_at', { ascending: false });
 
     for (const msg of messages || []) {
       if (!messagesMap.has(msg.campaign_id)) {
-        messagesMap.set(msg.campaign_id, { body: msg.body, subject: msg.subject, status: msg.status });
+        messagesMap.set(msg.campaign_id, {
+          body: msg.body,
+          subject: msg.subject,
+          status: msg.status,
+          sent_at: msg.sent_at,
+          reply_classification: msg.reply_classification,
+        });
       }
     }
   }
@@ -407,9 +414,18 @@ export async function listContacts(): Promise<RecruiterContact[]> {
       status: (camp?.status as RecruiterContact['status']) || 'draft',
       draft: msg?.body || '',
       subject: msg?.subject || undefined,
-      followup: '',
+      followup: camp?.next_followup_at || '',
       isSuppressed: c.is_suppressed || false,
       suppressionReason: c.suppression_reason || undefined,
+      campaignId: camp?.id,
+      initialSentAt: msg?.sent_at,
+      followupsSentCount: camp?.followups_sent_count || 0,
+      followupsFailedCount: camp?.followups_failed_count || 0,
+      lastFollowupAt: camp?.last_followup_at,
+      nextFollowupAt: camp?.next_followup_at,
+      maxFollowups: camp?.max_followups ?? 3,
+      autoSendFollowups: camp?.auto_send_followups ?? false,
+      replyClassification: msg?.reply_classification,
     };
   });
 }

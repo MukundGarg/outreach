@@ -5,10 +5,11 @@ const GOOGLE_AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_ENDPOINT = 'https://www.googleapis.com/oauth2/v2/userinfo';
 
-// Minimum necessary scopes: sending emails via Gmail API + userinfo.email for identity verification
+// Necessary scopes: sending emails via Gmail API + read-only messages for automatic recruiter reply detection + userinfo.email for identity verification
 const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
+const GMAIL_READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const USERINFO_EMAIL_SCOPE = 'https://www.googleapis.com/auth/userinfo.email';
-export const REQUIRED_GMAIL_SCOPES = [GMAIL_SEND_SCOPE, USERINFO_EMAIL_SCOPE];
+export const REQUIRED_GMAIL_SCOPES = [GMAIL_SEND_SCOPE, GMAIL_READONLY_SCOPE, USERINFO_EMAIL_SCOPE];
 
 export interface GmailConnectionStatus {
   connected: boolean;

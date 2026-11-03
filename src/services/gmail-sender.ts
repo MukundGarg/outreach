@@ -351,6 +351,26 @@ export async function sendUserApprovedEmail(
       );
     }
 
+    // Log outreach activity
+    try {
+      const { logOutreachActivity } = await import('./outreach-activity');
+      await logOutreachActivity({
+        userId: user.id,
+        campaignId,
+        recruiterContactId: contactId,
+        messageId: messageRecordId,
+        activityType: 'initial_sent',
+        title: `Outreach Email Sent: ${subject}`,
+        details: {
+          gmail_message_id: gmailData.id,
+          recipient_email: cleanRecipient,
+        },
+        clientOverride: { db, user },
+      });
+    } catch {
+      // Non-fatal activity logging
+    }
+
     return {
       messageId: messageRecordId,
       gmailMessageId: gmailData.id,

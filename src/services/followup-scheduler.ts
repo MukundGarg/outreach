@@ -1,10 +1,14 @@
 import 'server-only';
 import { authenticatedDatabase } from '@/services/applications';
 import { nextFollowup } from '@/lib/domain';
+import { logOutreachActivity } from './outreach-activity';
 
 export interface FollowupScheduleRecord {
   id: string;
+  user_id: string;
   message_id: string;
+  campaign_id?: string;
+  followup_number?: number;
   scheduled_at: string;
   skip_weekends: boolean;
   status: 'pending' | 'approved' | 'claimed' | 'completed' | 'cancelled' | 'failed';
@@ -16,23 +20,20 @@ export interface FollowupScheduleRecord {
 }
 
 /**
- * Schedule a follow-up for a sent email message.
- * Follows strict safety rules:
- * 1. Initial email message must be owned and in 'sent' status.
- * 2. Delay must be between 1 and 30 business/calendar days.
- * 3. Does not permit duplicate active pending/approved schedules for the same message.
- * 4. Recruiter contact must not be suppressed.
+ * Schedule a follow-up for an outreach message.
  */
 export async function scheduleFollowup({
   messageId,
   delayDays = 3,
   skipWeekends = true,
   autoApprove = false,
+  followupNumber = 1,
 }: {
   messageId: string;
   delayDays?: number;
   skipWeekends?: boolean;
   autoApprove?: boolean;
+  followupNumber?: number;
 }) {
   const { db, user } = await authenticatedDatabase();
 
@@ -51,15 +52,25 @@ export async function scheduleFollowup({
     throw new Error(`Cannot schedule follow-up: message is in status '${message.status}', must be 'sent'`);
   }
 
-  // 2. Fetch campaign and recruiter contact to verify not suppressed
+  // 2. Fetch campaign and recruiter contact to verify not suppressed and maximum limits not exceeded
   const { data: campaign, error: campError } = await db
     .from('outreach_campaigns')
-    .select('id, recruiter_contact_id')
+    .select('id, recruiter_contact_id, status, max_followups, followups_sent_count')
     .eq('id', message.campaign_id)
     .single();
 
   if (campError || !campaign) {
     throw new Error('Associated campaign not found');
+  }
+
+  if (['replied', 'completed', 'cancelled'].includes(campaign.status)) {
+    throw new Error(`Cannot schedule follow-up: campaign is already in terminal state '${campaign.status}'`);
+  }
+
+  const maxFollowups = campaign.max_followups ?? 3;
+  const currentSent = campaign.followups_sent_count ?? 0;
+  if (currentSent >= maxFollowups) {
+    throw new Error(`Cannot schedule follow-up: maximum configured limit of ${maxFollowups} follow-ups has already been reached`);
   }
 
   const { data: contact } = await db
@@ -72,7 +83,7 @@ export async function scheduleFollowup({
     throw new Error(`Cannot schedule follow-up: Recruiter contact is suppressed (${contact.suppression_reason || 'Opted out'})`);
   }
 
-  // 3. Check for existing active schedules for this message
+  // 3. Check for existing active schedules for this message or campaign
   const { data: existingSchedules } = await db
     .from('followup_schedules')
     .select('id, status')
@@ -96,6 +107,8 @@ export async function scheduleFollowup({
     .insert({
       user_id: user.id,
       message_id: messageId,
+      campaign_id: campaign.id,
+      followup_number: followupNumber,
       scheduled_at: scheduledDate.toISOString(),
       skip_weekends: skipWeekends,
       status,
@@ -107,6 +120,29 @@ export async function scheduleFollowup({
   if (insertError || !created) {
     throw new Error(insertError?.message || 'Failed to create follow-up schedule');
   }
+
+  // Update campaign's next_followup_at
+  await db
+    .from('outreach_campaigns')
+    .update({
+      next_followup_at: scheduledDate.toISOString(),
+      updated_at: nowIso,
+    })
+    .eq('id', campaign.id);
+
+  // Log activity
+  await logOutreachActivity({
+    campaignId: campaign.id,
+    recruiterContactId: campaign.recruiter_contact_id,
+    messageId: messageId,
+    activityType: 'followup_scheduled',
+    title: `Follow-up #${followupNumber} Scheduled`,
+    details: {
+      scheduled_at: scheduledDate.toISOString(),
+      status,
+      auto_approved: autoApprove,
+    },
+  });
 
   return created;
 }
@@ -129,10 +165,17 @@ export async function listFollowupSchedules() {
 }
 
 /**
- * Cancel a follow-up schedule (e.g. user manually cancels or recipient replied/opted-out).
+ * Cancel a specific follow-up schedule.
  */
 export async function cancelFollowupSchedule(scheduleId: string, reason?: string) {
   const { db, user } = await authenticatedDatabase();
+
+  const { data: schedule } = await db
+    .from('followup_schedules')
+    .select('id, campaign_id, message_id')
+    .eq('id', scheduleId)
+    .eq('user_id', user.id)
+    .single();
 
   const { data, error } = await db
     .from('followup_schedules')
@@ -150,7 +193,80 @@ export async function cancelFollowupSchedule(scheduleId: string, reason?: string
     throw new Error(`Failed to cancel follow-up schedule: ${error.message}`);
   }
 
+  if (schedule?.campaign_id) {
+    await db
+      .from('outreach_campaigns')
+      .update({ next_followup_at: null, updated_at: new Date().toISOString() })
+      .eq('id', schedule.campaign_id);
+
+    await logOutreachActivity({
+      campaignId: schedule.campaign_id,
+      messageId: schedule.message_id,
+      activityType: 'followup_cancelled',
+      title: 'Follow-up Cancelled',
+      details: { reason: reason || 'Cancelled by user' },
+    });
+  }
+
   return { success: true, schedule: data, reason };
+}
+
+/**
+ * Cancels all active follow-up schedules for a given campaign (e.g. when reply received, paused, completed).
+ */
+export async function cancelAllCampaignFollowups(
+  campaignId: string,
+  reason: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  dbOverride?: any,
+  userIdOverride?: string,
+) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let db: any;
+  let uid = userIdOverride;
+
+  if (dbOverride) {
+    db = dbOverride;
+  } else {
+    const auth = await authenticatedDatabase();
+    db = auth.db;
+    uid = auth.user.id;
+  }
+
+  // Find all messages in this campaign
+  const { data: msgs } = await db
+    .from('email_messages')
+    .select('id')
+    .eq('campaign_id', campaignId);
+
+  const messageIds = (msgs || []).map((m: { id: string }) => m.id);
+  if (messageIds.length === 0) return;
+
+  await db
+    .from('followup_schedules')
+    .update({
+      status: 'cancelled',
+      updated_at: new Date().toISOString(),
+    })
+    .in('message_id', messageIds)
+    .in('status', ['pending', 'approved', 'claimed']);
+
+  await db
+    .from('outreach_campaigns')
+    .update({
+      next_followup_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', campaignId);
+
+  await logOutreachActivity({
+    userId: uid,
+    campaignId,
+    activityType: 'followup_cancelled',
+    title: 'Pending Follow-ups Cancelled',
+    details: { reason },
+    clientOverride: { db, user: { id: uid } },
+  });
 }
 
 /**
@@ -164,6 +280,7 @@ export async function approveFollowupSchedule(scheduleId: string) {
     .update({
       status: 'approved',
       approved_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     })
     .eq('id', scheduleId)
     .eq('user_id', user.id)
@@ -173,6 +290,18 @@ export async function approveFollowupSchedule(scheduleId: string) {
 
   if (error || !data) {
     throw new Error(error?.message || 'Schedule not found or not in pending status');
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const updatedRecord = data as any;
+  if (updatedRecord.campaign_id) {
+    await logOutreachActivity({
+      campaignId: updatedRecord.campaign_id,
+      messageId: updatedRecord.message_id,
+      activityType: 'followup_approved',
+      title: `Follow-up #${updatedRecord.followup_number || 1} Approved`,
+      details: { scheduled_at: updatedRecord.scheduled_at },
+    });
   }
 
   return data;

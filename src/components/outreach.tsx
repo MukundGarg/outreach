@@ -14,12 +14,14 @@ import {
   UserPlus,
   Upload,
   Compass,
+  RefreshCw,
 } from 'lucide-react';
 import { label, type RecruiterContact } from '@/lib/domain';
 import type { DifyOutreachIntelligence, ReplyClassification } from '@/lib/ai-schemas';
 import { useWorkspace } from './use-workspace';
 import { ImportRecruitersModal } from './import-recruiters-modal';
 import { DiscoverRecruiters } from './discover-recruiters';
+import { FollowupTimeline } from './followup-timeline';
 
 export function Outreach() {
   const { isDemo, data, addContact, deleteContact, refresh, updateDraft } = useWorkspace();
@@ -456,6 +458,30 @@ export function Outreach() {
         </div>
 
         <div className="row" style={{ gap: 8 }}>
+          {!isDemo && gmailConnected && (
+            <button
+              type="button"
+              className="button"
+              style={{ fontSize: 12, borderColor: '#789966', color: '#27694e' }}
+              onClick={async () => {
+                setMessage('Checking Gmail inbox for replies and processing due follow-ups…');
+                try {
+                  const res = await fetch('/api/outreach/worker', { method: 'POST' });
+                  const json = await res.json();
+                  if (json.ok) {
+                    setMessage(`Automation sync completed: Checked ${json.data?.replies?.length || 0} mailboxes, processed ${json.data?.followups?.processed || 0} due follow-ups.`);
+                    if (refresh) await refresh();
+                  } else {
+                    setMessage(`Sync failed: ${json.error}`);
+                  }
+                } catch (err: unknown) {
+                  setMessage(`Sync error: ${err instanceof Error ? err.message : 'Failed'}`);
+                }
+              }}
+            >
+              <RefreshCw size={13} /> Check Replies &amp; Run Follow-ups
+            </button>
+          )}
           <button
             type="button"
             className="button"
@@ -785,6 +811,11 @@ export function Outreach() {
               {sentResult && (
                 <div className="notice" style={{ background: '#eaf4ea', borderColor: '#789966', color: '#27694e', marginTop: 12 }}>
                   <ShieldCheck size={16} /> <strong>Email Accepted by Gmail:</strong> Message ID {sentResult.gmailMessageId} recorded in Supabase.
+                </div>
+              )}
+              {contact.status !== 'draft' && (
+                <div style={{ marginTop: 20 }}>
+                  <FollowupTimeline contact={contact} isDemo={isDemo} onRefresh={refresh} />
                 </div>
               )}
             </>

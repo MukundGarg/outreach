@@ -145,6 +145,15 @@ export interface RecruiterContact {
   reply?: string;
   isSuppressed?: boolean;
   suppressionReason?: string;
+  campaignId?: string;
+  initialSentAt?: string;
+  followupsSentCount?: number;
+  followupsFailedCount?: number;
+  lastFollowupAt?: string;
+  nextFollowupAt?: string;
+  maxFollowups?: number;
+  autoSendFollowups?: boolean;
+  replyClassification?: string;
 }
 export function nextFollowup(start: Date, days: number, skipWeekends = true): Date {
   if (!Number.isInteger(days) || days < 1 || days > 365)
