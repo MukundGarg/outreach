@@ -111,6 +111,32 @@ export const applicationEmailDraftSchema = z.object({
 });
 export type ApplicationEmailDraft = z.infer<typeof applicationEmailDraftSchema>;
 
+// --- Bulk Recruiter CSV Extraction Schema ---
+
+export const canonicalRecruiterRecordSchema = z.object({
+  full_name: z.string().nullable().default(null),
+  email: z.string().nullable().default(null),
+  job_title: z.string().nullable().default(null),
+  company: z.string().nullable().default(null),
+  linkedin_url: z.string().nullable().default(null),
+  company_website: z.string().nullable().default(null),
+  location: z.string().nullable().default(null),
+  recruiting_specialties: z.array(z.string()).default([]),
+  source_url: z.string().nullable().default(null),
+  verification_status: z
+    .enum(['parsed', 'needs_review', 'pending_verification', 'verified', 'rejected', 'stale'])
+    .default('parsed'),
+  validation_issues: z.array(z.string()).default([]),
+});
+export type CanonicalRecruiterRecord = z.infer<typeof canonicalRecruiterRecordSchema>;
+
+export const csvRecruiterBatchAnalysisSchema = z.object({
+  column_mapping: z.record(z.string(), z.string()),
+  recruiters: z.array(canonicalRecruiterRecordSchema),
+  confidence_score: z.number().min(0).max(1).default(1),
+});
+export type CsvRecruiterBatchAnalysis = z.infer<typeof csvRecruiterBatchAnalysisSchema>;
+
 // --- Task 10: AI Router Typed Task Definitions ---
 
 export type AITaskName =
@@ -121,7 +147,8 @@ export type AITaskName =
   | 'reply_classify'
   | 'complex_application'
   | 'outreach_plan'
-  | 'application_email_draft';
+  | 'application_email_draft'
+  | 'recruiter_csv_analyze';
 
 export const aiTaskRequestSchema = z.object({
   task: z.enum([
@@ -133,6 +160,7 @@ export const aiTaskRequestSchema = z.object({
     'complex_application',
     'outreach_plan',
     'application_email_draft',
+    'recruiter_csv_analyze',
   ]),
   jobDescription: z.string().max(50000).optional(),
   replyText: z.string().max(20000).optional(),
@@ -142,6 +170,8 @@ export const aiTaskRequestSchema = z.object({
   unresolvedAnswers: z.record(z.string(), z.string()).optional(),
   jobTitle: z.string().max(200).optional(),
   company: z.string().max(200).optional(),
+  csvRows: z.array(z.record(z.string(), z.string())).max(100).optional(),
+  csvHeaders: z.array(z.string()).max(100).optional(),
   payload: z.record(z.string(), z.unknown()).optional(),
   applicationId: z.string().uuid().optional(),
   resumeId: z.string().uuid().optional(),

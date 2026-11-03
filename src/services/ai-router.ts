@@ -8,6 +8,7 @@ import {
   classifyRecruiterReply,
   draftBasicAnswer,
   draftApplicationEmail,
+  analyzeRecruiterCsvBatch,
 } from './gemini';
 import {
   runDifyApplicationIntelligence,
@@ -255,6 +256,15 @@ export async function routeAITask<T>(
             throw new Error(`Dify Agent 2 error: ${msg}`);
           }
         }
+        break;
+      }
+
+      case 'recruiter_csv_analyze': {
+        const headers = (payload.csvHeaders as string[]) || [];
+        const rows = (payload.csvRows as Record<string, string>[]) || [];
+        resultData = await analyzeRecruiterCsvBatch(headers, rows);
+        modelOrAgent = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+        provider = 'gemini';
         break;
       }
 

@@ -12,10 +12,14 @@ import {
   Sparkles,
   Trash2,
   UserPlus,
+  Upload,
+  Compass,
 } from 'lucide-react';
 import { label, type RecruiterContact } from '@/lib/domain';
 import type { DifyOutreachIntelligence, ReplyClassification } from '@/lib/ai-schemas';
 import { useWorkspace } from './use-workspace';
+import { ImportRecruitersModal } from './import-recruiters-modal';
+import { DiscoverRecruiters } from './discover-recruiters';
 
 export function Outreach() {
   const { isDemo, data, addContact, deleteContact, refresh, updateDraft } = useWorkspace();
@@ -57,6 +61,10 @@ export function Outreach() {
   const [classifyingReply, setClassifyingReply] = useState(false);
   const [replyClassification, setReplyClassification] = useState<ReplyClassification | null>(null);
   const [replyError, setReplyError] = useState('');
+
+  // Bulk CSV Import & Recruiter Discovery Tabs
+  const [activeTab, setActiveTab] = useState<'contacts' | 'discover'>('contacts');
+  const [showImportModal, setShowImportModal] = useState(false);
 
   // Active contact selection
   const contact = contacts.find((c) => c.id === selected) || contacts[0];
@@ -424,18 +432,67 @@ export function Outreach() {
         </div>
       )}
 
+      {/* Main Outreach Navigation Tabs & Actions */}
+      <div className="between" style={{ marginBottom: 16 }}>
+        <div className="row" style={{ gap: 8 }}>
+          <button
+            type="button"
+            className={`button ${activeTab === 'contacts' ? 'primary' : ''}`}
+            onClick={() => setActiveTab('contacts')}
+            style={{ fontSize: 13 }}
+          >
+            <Mail size={14} /> My Recruiter Outreach ({contacts.length})
+          </button>
+          <button
+            type="button"
+            className={`button ${activeTab === 'discover' ? 'primary' : ''}`}
+            onClick={() => setActiveTab('discover')}
+            style={{ fontSize: 13 }}
+          >
+            <Compass size={14} /> Discover Recruiters
+          </button>
+        </div>
+
+        <div className="row" style={{ gap: 8 }}>
+          <button
+            type="button"
+            className="button"
+            style={{ fontSize: 12 }}
+            onClick={() => setShowImportModal(true)}
+          >
+            <Upload size={13} /> Import Recruiters (CSV)
+          </button>
+          <button
+            type="button"
+            className="button"
+            style={{ fontSize: 12 }}
+            onClick={() => setShowAddContactModal(true)}
+          >
+            <Plus size={13} /> Add Contact
+          </button>
+        </div>
+      </div>
+
+      {activeTab === 'discover' ? (
+        <DiscoverRecruiters
+          existingContacts={contacts}
+          onAddContact={async (input) => {
+            if (addContact) {
+              return await addContact(input);
+            }
+            throw new Error('Contact addition not supported in current mode');
+          }}
+          onPrepareOutreach={(rec) => {
+            handleSelectContact(rec);
+            setActiveTab('contacts');
+          }}
+          isDemo={isDemo}
+        />
+      ) : (
       <div className="grid2">
         <section className="stack" style={{ alignContent: 'start' }}>
           <div className="between">
             <h2>Recruiter contacts</h2>
-            <button
-              type="button"
-              className="button"
-              style={{ fontSize: 12 }}
-              onClick={() => setShowAddContactModal(true)}
-            >
-              <Plus size={13} /> Add Contact
-            </button>
           </div>
 
           {data.contacts.length === 0 ? (
@@ -753,6 +810,7 @@ export function Outreach() {
           )}
         </section>
       </div>
+      )}
 
       {/* Add Recruiter Contact Modal */}
       {showAddContactModal && (
@@ -922,6 +980,16 @@ export function Outreach() {
           </div>
         </div>
       )}
+
+      {/* Recruiter Bulk CSV Import Modal */}
+      <ImportRecruitersModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onImportComplete={() => {
+          refresh?.();
+        }}
+        isDemo={isDemo}
+      />
     </>
   );
 }
