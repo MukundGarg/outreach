@@ -58,6 +58,14 @@ export const basicAnswerDraftSchema = z.object({
 });
 export type BasicAnswerDraft = z.infer<typeof basicAnswerDraftSchema>;
 
+export const applicationEmailDraftSchema = z.object({
+  subject: z.string().trim().min(1).max(200),
+  body: z.string().trim().min(1).max(8000),
+  key_points_used: z.array(z.string()).max(10),
+  warnings: z.array(z.string()).max(10),
+});
+export type ApplicationEmailDraft = z.infer<typeof applicationEmailDraftSchema>;
+
 // --- Task 4 & 7: Dify Agent 1 (Application Intelligence) Schema ---
 
 export const fieldMappingSchema = z.object({
@@ -114,7 +122,8 @@ export type AITaskName =
   | 'simple_answer'
   | 'reply_classify'
   | 'complex_application'
-  | 'outreach_plan';
+  | 'outreach_plan'
+  | 'application_email_draft';
 
 export const aiTaskRequestSchema = z.object({
   task: z.enum([
@@ -125,11 +134,19 @@ export const aiTaskRequestSchema = z.object({
     'reply_classify',
     'complex_application',
     'outreach_plan',
+    'application_email_draft',
   ]),
   jobDescription: z.string().max(50000).optional(),
   replyText: z.string().max(20000).optional(),
   resumeText: z.string().max(50000).optional(),
   screeningQuestions: z.array(z.string().max(1000)).max(50).optional(),
+  jobTitle: z.string().max(160).optional(),
+  company: z.string().max(160).optional(),
+  candidateAnswers: z.array(z.object({
+    question: z.string().trim().min(1).max(1000),
+    answer: z.string().max(3000),
+  })).max(25).optional(),
+  additionalContext: z.string().max(5000).optional(),
   payload: z.record(z.string(), z.unknown()).optional(),
   applicationId: z.string().uuid().optional(),
   resumeId: z.string().uuid().optional(),
